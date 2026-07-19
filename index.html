@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Resonate — geometry remake v2</title>
+    <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
+    <script src="https://unpkg.com/aframe-environment-component@1.2.0/dist/aframe-environment-component.min.js"></script>
+    <script src="https://unpkg.com/aframe-event-set-component@3.0.3/dist/aframe-event-set-component.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/aframe-extras@7.3.0/dist/aframe-extras.min.js"></script>
+
+    <script>
+      /* ---- Geodesic dome geometry (icosphere) ---- */
+      AFRAME.registerGeometry('icosphere', {
+        schema: {
+          radius: {type: 'number', default: 1},
+          detail: {type: 'int', default: 1}
+        },
+        init: function (data) {
+          var Geo = THREE.IcosahedronBufferGeometry || THREE.IcosahedronGeometry;
+          this.geometry = new Geo(data.radius, data.detail);
+        }
+      });
+
+      /* ---- Solid struts along every dome edge (instanced, one draw call) ---- */
+      AFRAME.registerComponent('dome-struts', {
+        schema: {
+          radius: {type: 'number', default: 120},
+          detail: {type: 'int', default: 2},
+          thickness: {type: 'number', default: 0.7}
+        },
+        init: function () {
+          var Geo = THREE.IcosahedronBufferGeometry || THREE.IcosahedronGeometry;
+          var ico = new Geo(this.data.radius, this.data.detail);
+          var edges = new THREE.EdgesGeometry(ico);
+          var pos = edges.attributes.position;
+          var count = pos.count / 2;
+          var CylGeo = THREE.CylinderBufferGeometry || THREE.CylinderGeometry;
+          var cyl = new CylGeo(this.data.thickness, this.data.thickness, 1, 6, 1);
+          var mat = new THREE.MeshStandardMaterial({
+            color: 0x0a0d1c,
+            emissive: 0x2233ff,
+            emissiveIntensity: 0.3,
+            metalness: 0.6,
+            roughness: 0.4
+          });
+          var mesh = new THREE.InstancedMesh(cyl, mat, count);
+          var up = new THREE.Vector3(0, 1, 0);
+          var a = new THREE.Vector3(), b = new THREE.Vector3();
+          var mid = new THREE.Vector3(), dir = new THREE.Vector3();
+          var q = new THREE.Quaternion(), s = new THREE.Vector3();
+          var m = new THREE.Matrix4();
+          for (var i = 0; i < count; i++) {
+            a.fromBufferAttribute(pos, i * 2);
+            b.fromBufferAttribute(pos, i * 2 + 1);
+            mid.addVectors(a, b).multiplyScalar(0.5);
+            dir.subVectors(b, a);
+            var len = dir.length();
+            q.setFromUnitVectors(up, dir.normalize());
+            s.set(1, len, 1);
+            m.compose(mid, q, s);
+            mesh.setMatrixAt(i, m);
+          }
+          mesh.instanceMatrix.needsUpdate = true;
+          this.el.setObject3D('struts', mesh);
+        }
+      });
+
+      /* ---- Rainbow nodes on every dome vertex ---- */
+      AFRAME.registerComponent('dome-nodes', {
+        schema: {
+          radius: {type: 'number', default: 120},
+          detail: {type: 'int', default: 2},
+          size: {type: 'number', default: 5}
+        },
+        init: function () {
+          var Geo = THREE.IcosahedronBufferGeometry || THREE.IcosahedronGeometry;
+          var geo = new Geo(this.data.radius, this.data.detail);
+          var verts = [];
+          if (geo.vertices && geo.vertices.length) {
+            verts = geo.vertices;
+          } else {
+            var pos = geo.attributes.position;
+            var seen = {};
+            for (var i = 0; i < pos.count; i++) {
+              var k = pos.getX(i).toFixed(1) + '_' + pos.getY(i).toFixed(1) + '_' + pos.getZ(i).toFixed(1);
+              if (!seen[k]) {
+                seen[k] = 1;
+                verts.push(new THREE.Vector3(pos.getX(i), pos.getY(i), pos.getZ(i)));
+              }
+            }
+          }
+          this.verts = verts;
+          this.count = verts.length;
+          var positions = new Float32Array(this.count * 3);
+          this.colors = new Float32Array(this.count * 3);
+          verts.forEach(function (v, i) {
+            positions[i * 3] = v.x;
+            positions[i * 3 + 1] = v.y;
+            positions[i * 3 + 2] = v.z;
+          });
+          var bg = new THREE.BufferGeometry();
+          bg.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+          bg.setAttribute('color', new THREE.BufferAttribute(this.colors, 3));
+          var c = document.createElement('canvas');
+          c.width = c.height = 64;
+          var x = c.getContext('2d');
+          var grd = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+          grd.addColorStop(0, 'rgba(255,255,255,1)');
+          grd.addColorStop(0.4, 'rgba(255,255,255,0.9)');
+          grd.addColorStop(1, 'rgba(255,255,255,0)');
+          x.fillStyle = grd;
+          x.fillRect(0, 0, 64, 64);
+          var mat = new THREE.PointsMaterial({
+            size: this.data.size,
+            map: new THREE.CanvasTexture(c),
+            vertexColors: true,
+            transparent: true,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            sizeAttenuation: true
+          });
+          this.points = new THREE.Points(bg, mat);
+          this.el.setObject3D('nodes', this.points);
+          this.tmpColor = new THREE.Color();
+        },
+        tick: function (time) {
+          var t = time / 1000;
+          for (var i = 0; i < this.count; i++) {
+            var v = this.verts[i];
+            var hue = (t * 0.04 + v.y / (this.data.radius * 2) +
+                       Math.atan2(v.z, v.x) / (Math.PI * 2)) % 1;
+            if (hue < 0) { hue += 1; }
+            this.tmpColor.setHSL(hue, 0.85, 0.75);
+            this.colors[i * 3] = this.tmpColor.r;
+            this.colors[i * 3 + 1] = this.tmpColor.g;
+            this.colors[i * 3 + 2] = this.tmpColor.b;
+          }
+          this.points.geometry.attributes.color.needsUpdate = true;
+        }
+      });
+
+      /* ---- Bright rainbow material for the dodecahedron ---- */
+      AFRAME.registerComponent('rainbow-material', {
+        init: function () {
+          var canvas = document.createElement('canvas');
+          canvas.width = 512; canvas.height = 512;
+          var ctx2 = canvas.getContext('2d');
+          var grad = ctx2.createLinearGradient(0, 0, 512, 512);
+          var cols = ['#ff0033', '#ff9900', '#ffee00', '#00ee44', '#00ccff', '#2244ff', '#cc00ff'];
+          cols.forEach(function (c, i) { grad.addColorStop(i / (cols.length - 1), c); });
+          ctx2.fillStyle = grad;
+          ctx2.fillRect(0, 0, 512, 512);
+          var tex = new THREE.CanvasTexture(canvas);
+          var el = this.el;
+          function apply () {
+            var mesh = el.getObject3D('mesh');
+            if (!mesh) { return; }
+            mesh.material = new THREE.MeshStandardMaterial({
+              map: tex,
+              emissive: new THREE.Color(0xffffff),
+              emissiveMap: tex,
+              emissiveIntensity: 0.6,
+              flatShading: true,
+              metalness: 0.3,
+              roughness: 0.4
+            });
+          }
+          if (el.getObject3D('mesh')) { apply(); }
+          el.addEventListener('object3dset', apply);
+        }
+      });
+
+      /* ---- Circuit-board floor texture, drawn in code ---- */
+      AFRAME.registerComponent('circuit-material', {
+        init: function () {
+          var canvas = document.createElement('canvas');
+          canvas.width = 1024; canvas.height = 1024;
+          var ctx2 = canvas.getContext('2d');
+          ctx2.fillStyle = '#04070c';
+          ctx2.fillRect(0, 0, 1024, 1024);
+          ctx2.lineWidth = 3;
+          for (var i = 0; i < 150; i++) {
+            var x = Math.random() * 1024;
+            var y = Math.random() * 1024;
+            ctx2.strokeStyle = '#0a3f46';
+            ctx2.beginPath();
+            ctx2.moveTo(x, y);
+            for (var s = 0; s < 4; s++) {
+              if (Math.random() < 0.5) { x += (Math.random() - 0.5) * 260; }
+              else { y += (Math.random() - 0.5) * 260; }
+              ctx2.lineTo(x, y);
+            }
+            ctx2.stroke();
+            ctx2.fillStyle = '#0fe0d8';
+            ctx2.beginPath();
+            ctx2.arc(x, y, 5, 0, Math.PI * 2);
+            ctx2.fill();
+          }
+          var tex = new THREE.CanvasTexture(canvas);
+          tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+          tex.repeat.set(6, 6);
+          var el = this.el;
+          function apply () {
+            var mesh = el.getObject3D('mesh');
+            if (!mesh) { return; }
+            mesh.material = new THREE.MeshBasicMaterial({map: tex});
+          }
+          if (el.getObject3D('mesh')) { apply(); }
+          el.addEventListener('object3dset', apply);
+        }
+      });
+
+      /* ---- Volumetric club lasers: bright core + soft glow, additive,
+              gradient fade along the beam like light through haze ---- */
+      var laserTexCache = {};
+      function laserGradientTexture (color) {
+        if (laserTexCache[color]) { return laserTexCache[color]; }
+        var c = document.createElement('canvas');
+        c.width = 8; c.height = 256;
+        var x = c.getContext('2d');
+        var g = x.createLinearGradient(0, 0, 0, 256);
+        g.addColorStop(0, '#000000');       /* top of beam fades to nothing */
+        g.addColorStop(0.55, color);
+        g.addColorStop(1, color);           /* brightest at the source */
+        x.fillStyle = g;
+        x.fillRect(0, 0, 8, 256);
+        var tex = new THREE.CanvasTexture(c);
+        laserTexCache[color] = tex;
+        return tex;
+      }
+      AFRAME.registerComponent('laser-fan', {
+        schema: {
+          color: {default: '#00ff66'},
+          beams: {type: 'int', default: 6},
+          length: {type: 'number', default: 70},
+          spread: {type: 'number', default: 70},
+          spin: {type: 'number', default: 0.25},
+          sway: {type: 'number', default: 10}
+        },
+        init: function () {
+          var d = this.data;
+          var tex = laserGradientTexture(d.color);
+          var CylGeo = THREE.CylinderBufferGeometry || THREE.CylinderGeometry;
+          var coreGeo = new CylGeo(0.045, 0.045, d.length, 6, 1, true);
+          var glowGeo = new CylGeo(0.22, 0.22, d.length, 6, 1, true);
+          var coreMat = new THREE.MeshBasicMaterial({
+            map: tex, blending: THREE.AdditiveBlending, transparent: true,
+            depthWrite: false, side: THREE.DoubleSide
+          });
+          var glowMat = new THREE.MeshBasicMaterial({
+            map: tex, blending: THREE.AdditiveBlending, transparent: true,
+            depthWrite: false, side: THREE.DoubleSide, opacity: 0.18
+          });
+          this.glowMat = glowMat;
+          this.coreMat = coreMat;
+          var group = new THREE.Group();
+          for (var i = 0; i < d.beams; i++) {
+            var tilt = (-d.spread / 2 + (d.spread / (d.beams - 1)) * i) * Math.PI / 180;
+            var pivot = new THREE.Group();
+            pivot.rotation.z = tilt;
+            var core = new THREE.Mesh(coreGeo, coreMat);
+            core.position.y = d.length / 2;
+            var glow = new THREE.Mesh(glowGeo, glowMat);
+            glow.position.y = d.length / 2;
+            pivot.add(core);
+            pivot.add(glow);
+            group.add(pivot);
+          }
+          this.group = group;
+          this.el.setObject3D('fan', group);
+          this.phase = Math.random() * Math.PI * 2;
+        },
+        tick: function (time, dt) {
+          var t = time / 1000;
+          this.group.rotation.y += (dt / 1000) * this.data.spin * Math.PI * 2 * 0.07;
+          this.group.rotation.z = Math.sin(t * 0.12 + this.phase) *
+                                  this.data.sway * Math.PI / 180;
+          /* flicker like haze drifting through the beam */
+          var f = 0.5 + 0.18 * Math.sin(t * 4 + this.phase) * Math.sin(t * 1.7);
+          this.coreMat.opacity = f;
+          this.glowMat.opacity = 0.12 + 0.08 * f;
+        }
+      });
+
+      /* ---- Drifting smoke / haze sprites ---- */
+      AFRAME.registerComponent('smoke', {
+        schema: {
+          count: {type: 'int', default: 45},
+          radius: {type: 'number', default: 95},
+          height: {type: 'number', default: 40},
+          opacity: {type: 'number', default: 0.12}
+        },
+        init: function () {
+          var c = document.createElement('canvas');
+          c.width = c.height = 128;
+          var x = c.getContext('2d');
+          var g = x.createRadialGradient(64, 64, 4, 64, 64, 64);
+          g.addColorStop(0, 'rgba(180,190,210,0.9)');
+          g.addColorStop(0.5, 'rgba(160,170,195,0.35)');
+          g.addColorStop(1, 'rgba(150,160,185,0)');
+          x.fillStyle = g;
+          x.fillRect(0, 0, 128, 128);
+          var tex = new THREE.CanvasTexture(c);
+          var group = new THREE.Group();
+          this.puffs = [];
+          for (var i = 0; i < this.data.count; i++) {
+            var mat = new THREE.SpriteMaterial({
+              map: tex, transparent: true, depthWrite: false,
+              opacity: this.data.opacity * (0.5 + Math.random() * 0.8),
+              rotation: Math.random() * Math.PI * 2
+            });
+            var sp = new THREE.Sprite(mat);
+            var ang = Math.random() * Math.PI * 2;
+            var r = Math.sqrt(Math.random()) * this.data.radius;
+            sp.position.set(Math.cos(ang) * r,
+                            Math.random() * this.data.height,
+                            Math.sin(ang) * r);
+            var sc = 18 + Math.random() * 22;
+            sp.scale.set(sc, sc, 1);
+            group.add(sp);
+            this.puffs.push({
+              sp: sp,
+              vy: 0.4 + Math.random() * 0.7,
+              vx: (Math.random() - 0.5) * 0.6,
+              vz: (Math.random() - 0.5) * 0.6,
+              vr: (Math.random() - 0.5) * 0.06
+            });
+          }
+          this.el.setObject3D('smoke', group);
+        },
+        tick: function (time, dt) {
+          var s = dt / 1000;
+          var h = this.data.height;
+          for (var i = 0; i < this.puffs.length; i++) {
+            var p = this.puffs[i];
+            p.sp.position.y += p.vy * s;
+            p.sp.position.x += p.vx * s;
+            p.sp.position.z += p.vz * s;
+            p.sp.material.rotation += p.vr * s;
+            if (p.sp.position.y > h) { p.sp.position.y = 0; }
+          }
+        }
+      });
+
+      /* =====================================================================
+         TWIN BROODING DRONES.
+         Two identical deep saw-stack voices (A0 root), each with its own
+         high-resonance lowpass starting almost closed. The second voice's
+         sweep starts 45 seconds behind the first, and its cycle is a
+         little longer (340s vs 300s), so the two resonant peaks are
+         forever crossing over each other in different places — shifting
+         interference between the cutoffs. Both feed the long feedback
+         delay and the big reverb. Nothing else. No plucks, no leads.
+         ===================================================================== */
+      var startResonateDrone = (function () {
+        var ctx, master, reverb, delay;
+
+        function send (from, to, amount) {
+          var g = ctx.createGain();
+          g.gain.value = amount;
+          from.connect(g);
+          g.connect(to);
+        }
+
+        /* one complete brooding voice: saw stack -> resonant swept lowpass */
+        function droneVoice (opts) {
+          var filter = ctx.createBiquadFilter();
+          filter.type = 'lowpass';
+          filter.Q.value = 14;
+          filter.frequency.setValueAtTime(opts.low, ctx.currentTime);
+
+          function sweep () {
+            var t = ctx.currentTime;
+            filter.frequency.setValueAtTime(opts.low, t);
+            filter.frequency.exponentialRampToValueAtTime(opts.high, t + opts.rise);
+            filter.frequency.exponentialRampToValueAtTime(opts.low, t + opts.rise + opts.fall);
+            setTimeout(sweep, (opts.rise + opts.fall) * 1000 - 100);
+          }
+          /* hold closed and brooding until this voice's turn comes */
+          setTimeout(sweep, opts.offset * 1000);
+
+          var vca = ctx.createGain();
+          vca.gain.setValueAtTime(0.0001, ctx.currentTime);
+          vca.gain.linearRampToValueAtTime(opts.gain, ctx.currentTime + 14);
+          filter.connect(vca);
+          vca.connect(master);
+          send(vca, reverb, 0.6);
+          send(vca, delay, 0.5);
+
+          /* the saw stack: A0 root, static pitches */
+          [[27.5, 'sawtooth', 0.5, 0],
+           [27.5, 'sawtooth', 0.35, -6],
+           [27.5, 'sawtooth', 0.35, 6],
+           [55, 'sawtooth', 0.15, 3],
+           [27.5, 'sine', 0.5, 0]].forEach(function (v) {
+            var o = ctx.createOscillator();
+            o.type = v[1];
+            o.frequency.value = v[0];
+            o.detune.value = v[3] + opts.detune;
+            var g = ctx.createGain();
+            g.gain.value = v[2];
+            o.connect(g);
+            g.connect(filter);
+            o.start();
+          });
+        }
+
+        /* ---------- wire it up ---------- */
+        return function start () {
+          if (ctx) { return; }
+          ctx = new (window.AudioContext || window.webkitAudioContext)();
+
+          master = ctx.createDynamicsCompressor();
+          var out = ctx.createGain();
+          out.gain.value = 0.9;
+          master.connect(out);
+          out.connect(ctx.destination);
+
+          /* ---- big soft reverb (generated impulse response) ---- */
+          var irLen = Math.floor(ctx.sampleRate * 4.5);
+          var ir = ctx.createBuffer(2, irLen, ctx.sampleRate);
+          for (var ch = 0; ch < 2; ch++) {
+            var d = ir.getChannelData(ch);
+            for (var i = 0; i < irLen; i++) {
+              d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / irLen, 2.5);
+            }
+          }
+          reverb = ctx.createConvolver();
+          reverb.buffer = ir;
+          var reverbGain = ctx.createGain();
+          reverbGain.gain.value = 0.9;
+          reverb.connect(reverbGain);
+          reverbGain.connect(master);
+
+          /* ---- long, hungry feedback delay ---- */
+          delay = ctx.createDelay(3);
+          delay.delayTime.value = 0.66;
+          var fb = ctx.createGain();
+          fb.gain.value = 0.62;
+          var fbLp = ctx.createBiquadFilter();
+          fbLp.type = 'lowpass';
+          fbLp.frequency.value = 2600;
+          delay.connect(fbLp);
+          fbLp.connect(fb);
+          fb.connect(delay);
+          var delayOut = ctx.createGain();
+          delayOut.gain.value = 0.65;
+          delay.connect(delayOut);
+          delayOut.connect(master);
+          send(delay, reverb, 0.5);
+
+          /* ---- the two voices ----
+             voice 2 trails voice 1 by 45s and runs a longer cycle,
+             so the crossover points never repeat the same way */
+          droneVoice({offset: 0,  rise: 150, fall: 150, low: 35, high: 720, detune: 0, gain: 0.15});
+          droneVoice({offset: 45, rise: 170, fall: 170, low: 35, high: 640, detune: 4, gain: 0.13});
+        };
+      })();
+    </script>
+  </head>
+
+  <body>
+    <!-- browsers block audio until a user gesture, so enter via a tap -->
+    <div id="enter"
+         style="position: fixed; inset: 0; z-index: 9999; display: flex;
+                align-items: center; justify-content: center; cursor: pointer;
+                background: rgba(2, 4, 12, 0.85); color: #8ff;
+                font-family: monospace; font-size: 22px; letter-spacing: 4px;">
+      &#9654; TAP TO ENTER RESONATE
+    </div>
+    <script>
+      document.getElementById('enter').addEventListener('click', function () {
+        this.style.display = 'none';
+        startResonateDrone();
+      });
+    </script>
+
+    <a-scene>
+      <a-assets>
+        <a-mixin id="cabinet"
+                 geometry="primitive: box; width: 9; height: 16; depth: 6"
+                 material="color: #b8bfd6; metalness: 0.2; roughness: 0.8"></a-mixin>
+        <a-mixin id="cone-big"
+                 geometry="primitive: cylinder; radius: 3; height: 0.6"
+                 rotation="90 0 0"
+                 material="color: #10131c; roughness: 0.9"></a-mixin>
+        <a-mixin id="cone-cap"
+                 geometry="primitive: cylinder; radius: 1.1; height: 0.4"
+                 rotation="90 0 0"
+                 material="color: #2a2f45; metalness: 0.6"></a-mixin>
+      </a-assets>
+
+      <a-entity environment="preset: starry; groundColor: #445; dressing: none"></a-entity>
+
+      <a-entity light="type: point; color: #fff; intensity: 4.2" position="50 90 0"></a-entity>
+      <a-entity light="type: ambient; intensity: 0.5"></a-entity>
+      <a-entity light="type: point; color: #00f; intensity: 2.8" position="0 80 10"></a-entity>
+
+      <!-- ============ THE DOME: solid struts + rainbow nodes ============ -->
+      <a-entity dome-struts="radius: 120; detail: 2; thickness: 0.7"></a-entity>
+      <a-entity geometry="primitive: icosphere; radius: 119; detail: 2"
+                material="color: #05060f; opacity: 0.25; transparent: true; side: back; shader: flat"></a-entity>
+      <a-entity dome-nodes="radius: 120; detail: 2; size: 5"></a-entity>
+
+      <!-- ============ SMOKE / HAZE ============ -->
+      <a-entity smoke="count: 45; radius: 95; height: 40; opacity: 0.12"></a-entity>
+
+      <!-- ============ FOUR SPEAKER STACKS ============ -->
+      <a-entity position="0 0 100" rotation="0 0 0">
+        <a-entity mixin="cabinet" position="0 8 0"></a-entity>
+        <a-entity mixin="cone-big" position="0 4.5 -3.1"></a-entity>
+        <a-entity mixin="cone-cap" position="0 4.5 -3.3"></a-entity>
+        <a-entity mixin="cone-big" position="0 11 -3.1"></a-entity>
+        <a-entity mixin="cone-cap" position="0 11 -3.3"></a-entity>
+        <a-box position="0 14.6 -3.1" width="5" height="2" depth="0.6" color="#10131c"></a-box>
+      </a-entity>
+      <a-entity position="0 0 -100" rotation="0 180 0">
+        <a-entity mixin="cabinet" position="0 8 0"></a-entity>
+        <a-entity mixin="cone-big" position="0 4.5 -3.1"></a-entity>
+        <a-entity mixin="cone-cap" position="0 4.5 -3.3"></a-entity>
+        <a-entity mixin="cone-big" position="0 11 -3.1"></a-entity>
+        <a-entity mixin="cone-cap" position="0 11 -3.3"></a-entity>
+        <a-box position="0 14.6 -3.1" width="5" height="2" depth="0.6" color="#10131c"></a-box>
+      </a-entity>
+      <a-entity position="100 0 0" rotation="0 90 0">
+        <a-entity mixin="cabinet" position="0 8 0"></a-entity>
+        <a-entity mixin="cone-big" position="0 4.5 -3.1"></a-entity>
+        <a-entity mixin="cone-cap" position="0 4.5 -3.3"></a-entity>
+        <a-entity mixin="cone-big" position="0 11 -3.1"></a-entity>
+        <a-entity mixin="cone-cap" position="0 11 -3.3"></a-entity>
+        <a-box position="0 14.6 -3.1" width="5" height="2" depth="0.6" color="#10131c"></a-box>
+      </a-entity>
+      <a-entity position="-100 0 0" rotation="0 -90 0">
+        <a-entity mixin="cabinet" position="0 8 0"></a-entity>
+        <a-entity mixin="cone-big" position="0 4.5 -3.1"></a-entity>
+        <a-entity mixin="cone-cap" position="0 4.5 -3.3"></a-entity>
+        <a-entity mixin="cone-big" position="0 11 -3.1"></a-entity>
+        <a-entity mixin="cone-cap" position="0 11 -3.3"></a-entity>
+        <a-box position="0 14.6 -3.1" width="5" height="2" depth="0.6" color="#10131c"></a-box>
+      </a-entity>
+
+      <!-- ============ CENTRE STAGE ============ -->
+      <a-torus color="#e0201a" position="0 2.4 0" rotation="90 0 0"
+               radius="5" radius-tubular="1"
+               segments-tubular="6" segments-radial="12"
+               material="metalness: 0.3; roughness: 0.5"></a-torus>
+      <a-cylinder position="0 2 0" color="blue" height="0.1" radius="12" opacity="0.3"></a-cylinder>
+
+      <a-box color="green" depth="2" height="2" width="2" position="0 2 10"
+             event-set__enter="_event: mouseenter; material.color: #8FF7FF"
+             event-set__leave="_event: mouseleave; material.color: green"></a-box>
+      <a-box color="blue" depth="2" height="2" width="2" position="0 2 -10"></a-box>
+      <a-box color="yellow" depth="2" height="2" width="2" position="10 2 0"></a-box>
+      <a-box color="red" depth="2" height="2" width="2" position="-10 2 0"></a-box>
+
+      <!-- ============ ROTATING CIRCUIT FLOOR ============ -->
+      <a-cylinder circuit-material radius="400" height="3.2" position="0 0 0"
+                  animation="delay: 2; property: rotation; to: 0 360 0; dur: 120000; loop: true; easing: linear"></a-cylinder>
+
+      <!-- ============ RISING / FALLING GREEN RINGS ============ -->
+      <a-ring color="green" radius-inner="20" radius-outer="20.5" rotation="90 0 0"
+              position="0 90 0" shader="flat"
+              animation="delay: 2; property: position; to: 0 0 0; dur: 80000; loop: true"></a-ring>
+      <a-ring color="green" radius-inner="20" radius-outer="20.5" rotation="90 0 0"
+              position="0 0 0" shader="flat"
+              animation="delay: 2; property: position; to: 0 90 0; dur: 80000; loop: true"></a-ring>
+
+      <!-- ============ RAINBOW DODECAHEDRON (height: change position y here) ============ -->
+      <a-entity geometry="primitive: dodecahedron; radius: 9" rainbow-material
+                position="0 45 0"
+                animation="delay: 400; property: rotation; to: 360 360 360; dur: 82000; easing: linear; loop: true"></a-entity>
+
+      <!-- ============ ORBITING ROBOT ============ -->
+      <a-entity animation="property: rotation; to: 0 360 0; loop: true; dur: 120000; easing: linear">
+        <a-entity position="0 0 -50" rotation="0 -90 0">
+          <a-box position="0 8 0" width="6" height="14" depth="4"
+                 material="color: #14161f; metalness: 0.9; roughness: 0.35"></a-box>
+          <a-box position="0 17 0" width="4" height="4" depth="3.5"
+                 material="color: #14161f; metalness: 0.9; roughness: 0.35"></a-box>
+          <a-box position="-1.1 16.8 -1.8" width="0.8" height="0.4" depth="0.2"
+                 material="shader: flat; color: #00ffcc"></a-box>
+          <a-box position="1.1 16.8 -1.8" width="0.8" height="0.4" depth="0.2"
+                 material="shader: flat; color: #00ffcc"></a-box>
+          <a-box position="-4 9 0" width="1.6" height="10" depth="2"
+                 material="color: #1c1f2c; metalness: 0.8; roughness: 0.4"></a-box>
+          <a-box position="4 9 0" width="1.6" height="10" depth="2"
+                 material="color: #1c1f2c; metalness: 0.8; roughness: 0.4"></a-box>
+        </a-entity>
+      </a-entity>
+
+      <!-- ============ VOLUMETRIC LASERS ============ -->
+      <a-entity laser-fan="color: #00ff66; spin: 0.20" position="-60 0 -30"></a-entity>
+      <a-entity laser-fan="color: #00e5ff; spin: 0.14" position="20 0 -50"></a-entity>
+      <a-entity laser-fan="color: #00e5ff; spin: 0.28" position="60 0 -20"></a-entity>
+      <a-entity laser-fan="color: #00ff66; spin: 0.17" position="40 0 60"></a-entity>
+      <a-entity laser-fan="color: #00e5ff; spin: 0.24" position="-40 0 -60"></a-entity>
+      <a-entity laser-fan="color: #00ff66; spin: 0.12" position="-60 0 70"></a-entity>
+      <a-entity laser-fan="color: #00e5ff; spin: 0.19" position="20 0 80"></a-entity>
+      <a-entity laser-fan="color: #00ff66; spin: 0.26" position="60 0 90"></a-entity>
+      <a-entity laser-fan="color: #00e5ff; spin: 0.15" position="-66 0 -10"></a-entity>
+      <a-entity laser-fan="color: #00ff66; spin: 0.22" position="35 0 -5"></a-entity>
+
+      <!-- ============ PLAYER ============ -->
+      <a-entity id="rig" position="0 3 20" movement-controls="speed: 0.3">
+        <a-entity camera position="0 4.5 0" look-controls wasd-controls="enabled: false"></a-entity>
+      </a-entity>
+
+    </a-scene>
+  </body>
+</html>
