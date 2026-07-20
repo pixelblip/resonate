@@ -1,2389 +1,610 @@
 <!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Rainbow Hex Tunnel 8</title>
-  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
-  <style>
-    html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
-    #audio-gate {
-      position: fixed; inset: 0; z-index: 10000;
-      display: flex; align-items: center; justify-content: center;
-      background: rgba(0, 0, 8, 0.88);
-      color: #ffe600; font-family: Georgia, "Times New Roman", serif;
-      font-size: 1.35rem; letter-spacing: 0.08em; cursor: pointer;
-      user-select: none; -webkit-tap-highlight-color: transparent;
-      touch-action: manipulation;
-    }
-    #audio-gate[hidden] { display: none; }
-    #audio-gate span {
-      border: 1px solid rgba(255, 230, 0, 0.45);
-      padding: 0.9rem 1.6rem; text-align: center; pointer-events: none;
-    }
-    #audio-gate small {
-      display: block; margin-top: 0.7rem; font-size: 0.75rem;
-      color: rgba(255, 230, 0, 0.55); letter-spacing: 0.04em;
-    }
-    /* In-VR / after gate: tiny tap target if Quest suspends audio again */
-    #audio-resume {
-      display: none; position: fixed; bottom: 1.25rem; left: 50%;
-      transform: translateX(-50%); z-index: 10001;
-      font: 0.85rem Georgia, "Times New Roman", serif;
-      letter-spacing: 0.06em; color: #ffe600;
-      background: rgba(0, 0, 8, 0.85); border: 1px solid rgba(255, 230, 0, 0.5);
-      padding: 0.65rem 1.1rem; cursor: pointer; touch-action: manipulation;
-    }
-    #audio-resume.show { display: block; }
-    /* Force sound unlock before VR on Quest */
-    body:not(.audio-on) .a-enter-vr-button,
-    body:not(.audio-on) .a-enter-ar-button {
-      display: none !important;
-    }
-  </style>
-  <script>
-    /**
-     * tunnel8 — reachable fidget spinner + working pinch grab (hands at chest height).
-     */
-    const TunnelDrone = {
-      ctx: null,
-      running: false,
-      nodes: null,
-      ROOT: 55, // A1 — everything stays in A
-      BPM: 64,
-      beatSec: 60 / 64,
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Resonate — geometry remake v2</title>
+    <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
+    <script src="https://unpkg.com/aframe-environment-component@1.2.0/dist/aframe-environment-component.min.js"></script>
+    <script src="https://unpkg.com/aframe-event-set-component@3.0.3/dist/aframe-event-set-component.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/aframe-extras@7.3.0/dist/aframe-extras.min.js"></script>
 
-      // A minor / raga-ish degrees (ratios from root)
-      DEG: {
-        '1': 1,
-        '2': 9 / 8,
-        'b3': 6 / 5,
-        '3': 5 / 4,
-        '4': 4 / 3,
-        '5': 3 / 2,
-        '6': 5 / 3,
-        'b7': 16 / 9, // komal ni — Indian flat 7th
-        '7': 15 / 8
-      },
-
-      // 16th-note bars. Tabla: D=dha T=tin N=na G=ge K=ka R=ti
-      TABLA: {
-        keherwa: [
-          'D', null, null, 'D', 'T', null, null, null,
-          'D', null, 'D', null, 'T', null, null, null
-        ],
-        keherwa2: [
-          'D', null, 'G', null, 'T', null, 'N', null,
-          'D', null, 'D', 'G', 'T', null, 'N', null
-        ],
-        dadra: [
-          'D', null, null, null, 'T', null, 'N', null,
-          'D', null, 'G', null, 'T', null, null, null
-        ],
-        rupak: [
-          'T', null, 'N', null, 'D', null, null, null,
-          'T', null, 'N', 'T', 'D', null, 'G', null
-        ],
-        chatter: [
-          'D', 'T', null, 'N', 'D', null, 'T', 'N',
-          null, 'D', 'G', null, 'T', 'N', 'T', null
-        ],
-        sparse: [
-          'D', null, null, null, null, null, 'T', null,
-          null, null, 'D', null, null, null, 'N', null
-        ],
-        fillA: [
-          'D', 'T', 'D', 'T', 'G', 'N', 'T', 'N',
-          'D', 'G', 'T', 'N', 'T', 'T', 'N', 'K'
-        ],
-        fillB: [
-          'T', 'N', 'T', 'N', 'D', null, 'G', 'K',
-          'D', 'T', 'N', 'T', 'D', 'G', 'T', 'D'
-        ]
-      },
-
-      // Quiet 808: k=kick s=snare h=closed hat o=open hat
-      DRUMS: {
-        fourOnFloor: [
-          'k', 'h', null, 'h', 's', 'h', null, 'h',
-          'k', 'h', 'k', 'h', 's', 'h', null, 'o'
-        ],
-        halfTime: [
-          'k', null, 'h', null, 's', null, 'h', 'h',
-          'k', null, 'h', 'k', 's', null, 'h', 'o'
-        ],
-        syncop: [
-          'k', 'h', null, 'k', 's', null, 'h', 'k',
-          null, 'h', 'k', 'h', 's', 'h', null, 'h'
-        ],
-        skip: [
-          'k', null, 'h', 'h', 's', null, null, 'h',
-          'k', 'h', null, 'k', 's', null, 'h', 'o'
-        ],
-        sparse: [
-          'k', null, null, 'h', 's', null, null, null,
-          'k', null, 'h', null, 's', null, null, 'h'
-        ],
-        fill: [
-          'k', 'h', 's', 'h', 'k', 's', 'h', 's',
-          'k', 'h', 'k', 's', 's', 'h', 's', 'o'
-        ]
-      },
-
-      // Busier dub bass — 16th slots { deg, oct } (ROOT=A1)
-      BASS: {
-        dubA: [
-          { deg: '1', oct: 0 }, null, null, { deg: '1', oct: 0 },
-          null, { deg: 'b7', oct: -1 }, null, { deg: '1', oct: 0 },
-          { deg: '5', oct: -1 }, null, { deg: '1', oct: 0 }, null,
-          { deg: 'b7', oct: -1 }, null, { deg: '5', oct: -1 }, { deg: '1', oct: 0 }
-        ],
-        dubB: [
-          { deg: '1', oct: 0 }, null, { deg: '1', oct: 0 }, { deg: 'b7', oct: -1 },
-          null, null, { deg: '5', oct: -1 }, null,
-          { deg: '1', oct: 0 }, { deg: '1', oct: 0 }, null, { deg: '3', oct: 0 },
-          { deg: '5', oct: -1 }, null, { deg: 'b7', oct: -1 }, null
-        ],
-        dubC: [
-          { deg: '1', oct: 0 }, { deg: '1', oct: 0 }, null, { deg: '5', oct: -1 },
-          { deg: 'b7', oct: -1 }, null, { deg: '1', oct: 0 }, null,
-          null, { deg: '5', oct: -1 }, { deg: 'b7', oct: -1 }, { deg: '1', oct: 0 },
-          { deg: '1', oct: 0 }, null, { deg: 'b7', oct: -1 }, { deg: '5', oct: -1 }
-        ],
-        dubD: [
-          { deg: '1', oct: 0 }, null, { deg: 'b7', oct: -1 }, { deg: '1', oct: 0 },
-          { deg: '5', oct: -1 }, { deg: '5', oct: -1 }, null, { deg: 'b7', oct: -1 },
-          { deg: '1', oct: 0 }, null, null, { deg: '1', oct: 0 },
-          { deg: 'b7', oct: -1 }, { deg: '5', oct: -1 }, null, { deg: '1', oct: 0 }
-        ],
-        dubBreak: [
-          { deg: '1', oct: 0 }, null, null, null,
-          { deg: 'b7', oct: -1 }, null, { deg: '5', oct: -1 }, null,
-          { deg: '1', oct: 0 }, null, { deg: '1', oct: 0 }, null,
-          null, { deg: 'b7', oct: -1 }, null, null
-        ]
-      },
-
-      // Hi-hat variations applied on top of drum kits each bar
-      HAT_VARS: [
-        // classic offbeats
-        [null, 'h', null, 'h', null, 'h', null, 'h', null, 'h', null, 'h', null, 'h', null, 'o'],
-        // busier 16ths
-        ['h', 'h', null, 'h', 'h', null, 'h', 'h', null, 'h', 'h', null, 'h', 'h', null, 'o'],
-        // sparse
-        [null, null, 'h', null, null, 'h', null, null, null, 'h', null, null, 'h', null, null, 'h'],
-        // shuffle feel
-        [null, 'h', 'h', null, null, 'h', 'h', null, null, 'h', null, 'h', null, 'h', 'h', 'o'],
-        // open accents
-        [null, 'h', null, 'o', null, 'h', null, 'h', null, 'h', null, 'o', null, 'h', null, 'h'],
-        // gallop
-        ['h', null, 'h', 'h', null, 'h', null, 'h', 'h', null, 'h', 'h', null, 'h', null, 'o']
-      ],
-
-      // Groove: 8 bars then 1 fill — forever
-      SECTIONS: [
-        { name: 'grooveA', bars: 8, drums: 'fourOnFloor', tabla: 'keherwa', bass: 'dubA', guitar: false, pepper: false },
-        { name: 'fill', bars: 1, drums: 'fill', tabla: 'fillA', bass: 'dubC', guitar: false, pepper: false },
-        { name: 'grooveB', bars: 8, drums: 'halfTime', tabla: 'dadra', bass: 'dubB', guitar: true, pepper: true },
-        { name: 'fill', bars: 1, drums: 'fill', tabla: 'fillB', bass: 'dubA', guitar: false, pepper: false },
-        { name: 'grooveC', bars: 8, drums: 'syncop', tabla: 'keherwa2', bass: 'dubC', guitar: true, pepper: false },
-        { name: 'fill', bars: 1, drums: 'fill', tabla: 'fillA', bass: 'dubD', guitar: false, pepper: false },
-        { name: 'grooveD', bars: 8, drums: 'skip', tabla: 'rupak', bass: 'dubD', guitar: true, pepper: true },
-        { name: 'fill', bars: 1, drums: 'fill', tabla: 'fillB', bass: 'dubB', guitar: false, pepper: false },
-        { name: 'break', bars: 8, drums: 'sparse', tabla: 'sparse', bass: 'dubBreak', guitar: false, pepper: true },
-        { name: 'fill', bars: 1, drums: 'fill', tabla: 'chatter', bass: 'dubA', guitar: false, pepper: false },
-        { name: 'peak', bars: 8, drums: 'fourOnFloor', tabla: 'chatter', bass: 'dubD', guitar: true, pepper: true },
-        { name: 'fill', bars: 1, drums: 'fill', tabla: 'fillA', bass: 'dubC', guitar: false, pepper: false }
-      ],
-
-      async start() {
-        if (this.running) return;
-        const AC = window.AudioContext || window.webkitAudioContext;
-        this.ctx = new AC();
-        if (this.ctx.state === 'suspended') await this.ctx.resume();
-        await this.loadSitarSample();
-        await this.loadGuitarSample();
-        this.buildGraph();
-        this.running = true;
-        this.beatSec = 60 / this.BPM;
-        this._beatIndex = 0;
-        this._barInSection = 0;
-        this._sectionIndex = 0;
-        // Drone alone first; groove / lead / sitar enter after ~1.5 min
-        const enterIn = 70 + Math.random() * 40; // 70–110s
-        this._ensembleInAt = this.ctx.currentTime + enterIn;
-        this._nextBeatAt = this._ensembleInAt;
-        this._nextPepperAt = this._ensembleInAt + 8;
-        this._ensembleLive = false;
-        this.animate();
-        // Keep AudioContext alive (browsers suspend it in background tabs)
-        this._keepAlive = setInterval(() => {
-          if (!this.running || !this.ctx) return;
-          if (this.ctx.state === 'suspended') this.ctx.resume();
-        }, 3000);
-        document.addEventListener('visibilitychange', () => {
-          if (document.visibilityState === 'visible' && this.ctx) this.ctx.resume();
-        });
-        window.addEventListener('focus', () => {
-          if (this.ctx) this.ctx.resume();
-        });
-      },
-
-      async loadGuitarSample() {
-        try {
-          const res = await fetch('audio/guitar-a4.wav');
-          const arr = await res.arrayBuffer();
-          this.guitarBuffer = await this.ctx.decodeAudioData(arr);
-          this.guitarBaseHz = 440; // A4 Karplus-Strong pluck
-        } catch (e) {
-          console.warn('Guitar sample failed to load', e);
-          this.guitarBuffer = null;
+    <script>
+      /* ---- Geodesic dome geometry (icosphere) ---- */
+      AFRAME.registerGeometry('icosphere', {
+        schema: {
+          radius: {type: 'number', default: 1},
+          detail: {type: 'int', default: 1}
+        },
+        init: function (data) {
+          var Geo = THREE.IcosahedronBufferGeometry || THREE.IcosahedronGeometry;
+          this.geometry = new Geo(data.radius, data.detail);
         }
-      },
+      });
 
-      async loadSitarSample() {
-        try {
-          const res = await fetch('audio/sitar-c5.wav');
-          const arr = await res.arrayBuffer();
-          this.sitarBuffer = await this.ctx.decodeAudioData(arr);
-          // Sample is C5 (~523.25 Hz)
-          this.sitarBaseHz = 523.25;
-        } catch (e) {
-          console.warn('Sitar sample failed to load', e);
-          this.sitarBuffer = null;
-        }
-      },
-
-      hz(deg, oct = 0) {
-        return this.ROOT * this.DEG[deg] * Math.pow(2, oct);
-      },
-
-      makeOscStack(ctx, root, specs) {
-        const bus = ctx.createGain();
-        bus.gain.value = 1;
-        specs.forEach((p) => {
-          const osc = ctx.createOscillator();
-          osc.type = p.type;
-          osc.frequency.value = root * p.ratio;
-          osc.detune.value = p.detune || 0;
-          const g = ctx.createGain();
-          g.gain.value = p.gain;
-          osc.connect(g);
-          g.connect(bus);
-          osc.start();
-        });
-        return bus;
-      },
-
-      makeDelay(ctx, timeL, timeR, feedback, tone) {
-        // Safe stereo delay: separate feedback paths, hard-capped so it can't runaway
-        const fbAmt = Math.min(feedback, 0.32);
-        const delayL = ctx.createDelay(5);
-        const delayR = ctx.createDelay(5);
-        delayL.delayTime.value = timeL;
-        delayR.delayTime.value = timeR;
-
-        const fbL = ctx.createGain();
-        const fbR = ctx.createGain();
-        fbL.gain.value = fbAmt;
-        fbR.gain.value = fbAmt;
-
-        const toneL = ctx.createBiquadFilter();
-        toneL.type = 'lowpass';
-        toneL.frequency.value = tone;
-        toneL.Q.value = 0.7;
-        const toneR = ctx.createBiquadFilter();
-        toneR.type = 'lowpass';
-        toneR.frequency.value = tone * 0.92;
-        toneR.Q.value = 0.7;
-
-        const input = ctx.createGain();
-        const wet = ctx.createGain();
-        wet.gain.value = 0.7;
-        const merger = ctx.createChannelMerger(2);
-
-        // Ping-pong: L feeds R, R feeds L — shifting, not stacking
-        input.connect(delayL);
-        input.connect(delayR);
-        delayL.connect(toneL);
-        delayR.connect(toneR);
-        toneL.connect(fbL);
-        toneR.connect(fbR);
-        fbL.connect(delayR);
-        fbR.connect(delayL);
-        toneL.connect(merger, 0, 0);
-        toneR.connect(merger, 0, 1);
-        merger.connect(wet);
-
-        const lfo1 = ctx.createOscillator();
-        lfo1.frequency.value = 0.02 + Math.random() * 0.015;
-        const d1 = ctx.createGain();
-        d1.gain.value = 0.025;
-        lfo1.connect(d1);
-        d1.connect(delayL.delayTime);
-        lfo1.start();
-
-        const lfo2 = ctx.createOscillator();
-        lfo2.frequency.value = 0.015 + Math.random() * 0.015;
-        const d2 = ctx.createGain();
-        d2.gain.value = 0.03;
-        lfo2.connect(d2);
-        d2.connect(delayR.delayTime);
-        lfo2.start();
-
-        return { input, wet, fb: fbL, fbL, fbR, toneFilter: toneL, delayL, delayR };
-      },
-
-      makePhaser(ctx) {
-        const input = ctx.createGain();
-        const dry = ctx.createGain();
-        const wet = ctx.createGain();
-        dry.gain.value = 0.45;
-        wet.gain.value = 0.55;
-
-        const stages = [200, 400, 800, 1600].map((f) => {
-          const ap = ctx.createBiquadFilter();
-          ap.type = 'allpass';
-          ap.frequency.value = f;
-          ap.Q.value = 1.4;
-          return ap;
-        });
-        stages.reduce((a, b) => (a.connect(b), b));
-
-        const fb = ctx.createGain();
-        fb.gain.value = 0.25;
-        stages[stages.length - 1].connect(fb);
-        fb.connect(stages[0]);
-
-        const lfo = ctx.createOscillator();
-        lfo.type = 'sine';
-        lfo.frequency.value = 0.015;
-        const depth = ctx.createGain();
-        depth.gain.value = 500;
-        lfo.connect(depth);
-        stages.forEach((ap) => depth.connect(ap.frequency));
-        lfo.start();
-
-        const out = ctx.createGain();
-        input.connect(dry);
-        input.connect(stages[0]);
-        stages[stages.length - 1].connect(wet);
-        dry.connect(out);
-        wet.connect(out);
-
-        return { input, out, wet, dry, fb, lfo, depth, stages };
-      },
-
-      buildGraph() {
-        const ctx = this.ctx;
-        const root = this.ROOT;
-
-        const master = ctx.createGain();
-        master.gain.value = 0.0001;
-
-        // Hard ceiling so delays can never crunch the whole mix into silence
-        const limiter = ctx.createDynamicsCompressor();
-        limiter.threshold.value = -10;
-        limiter.knee.value = 6;
-        limiter.ratio.value = 8;
-        limiter.attack.value = 0.003;
-        limiter.release.value = 0.25;
-
-        const comp = ctx.createDynamicsCompressor();
-        comp.threshold.value = -28;
-        comp.knee.value = 20;
-        comp.ratio.value = 2.2;
-        comp.attack.value = 0.08;
-        comp.release.value = 0.45;
-        master.connect(comp);
-        comp.connect(limiter);
-        limiter.connect(ctx.destination);
-
-        const droneRoot = root * 0.5; // octave below — deeper filter sweep
-
-        // Ensemble bus: tabla / dub / guitar / sitar — silent until fade-in
-        const ensemble = ctx.createGain();
-        ensemble.gain.value = 0.0001;
-        ensemble.connect(master);
-
-        // ---- Layer 1: main resonant drone (quieter, mostly wet delay) ----
-        const layer1 = this.makeOscStack(ctx, droneRoot, [
-          { type: 'sawtooth', ratio: 1, gain: 0.28, detune: 0 },
-          { type: 'triangle', ratio: 1, gain: 0.22, detune: 4 },
-          { type: 'sawtooth', ratio: 2, gain: 0.14, detune: -3 },
-          { type: 'triangle', ratio: 3, gain: 0.09, detune: 5 },
-          { type: 'sawtooth', ratio: 4, gain: 0.05, detune: -2 },
-          { type: 'sine', ratio: 0.5, gain: 0.2, detune: 0 }
-        ]);
-        const filter1 = ctx.createBiquadFilter();
-        filter1.type = 'lowpass';
-        filter1.frequency.value = 55;
-        filter1.Q.value = 10;
-        const polish1 = ctx.createBiquadFilter();
-        polish1.type = 'lowpass';
-        polish1.frequency.value = 2800;
-        polish1.Q.value = 0.6;
-        const amp1 = ctx.createGain();
-        amp1.gain.value = 0.35;
-        const delay1 = this.makeDelay(ctx, 0.75, 0.95, 0.3, 1200);
-        const dry1 = ctx.createGain();
-        dry1.gain.value = 0.22;
-        const wet1 = ctx.createGain();
-        wet1.gain.value = 0.62;
-
-        layer1.connect(filter1);
-        filter1.connect(polish1);
-        polish1.connect(dry1);
-        polish1.connect(delay1.input);
-        delay1.wet.connect(wet1);
-        dry1.connect(amp1);
-        wet1.connect(amp1);
-        amp1.connect(master);
-
-        // ---- Layer 2: triangle pad ----
-        const layer2 = this.makeOscStack(ctx, droneRoot, [
-          { type: 'triangle', ratio: 1, gain: 0.22, detune: -6 },
-          { type: 'triangle', ratio: 2, gain: 0.12, detune: 7 },
-          { type: 'sine', ratio: 3, gain: 0.07, detune: -4 },
-          { type: 'triangle', ratio: 5, gain: 0.04, detune: 3 }
-        ]);
-        const filter2 = ctx.createBiquadFilter();
-        filter2.type = 'lowpass';
-        filter2.frequency.value = 200;
-        filter2.Q.value = 3.5;
-        const amp2 = ctx.createGain();
-        amp2.gain.value = 0.22;
-        const delay2 = this.makeDelay(ctx, 0.91, 1.12, 0.28, 1000);
-        const dry2 = ctx.createGain();
-        dry2.gain.value = 0.2;
-        const wet2 = ctx.createGain();
-        wet2.gain.value = 0.55;
-
-        layer2.connect(filter2);
-        filter2.connect(dry2);
-        filter2.connect(delay2.input);
-        delay2.wet.connect(wet2);
-        dry2.connect(amp2);
-        wet2.connect(amp2);
-        amp2.connect(master);
-
-        // ---- Layer 3: phaser partials ----
-        const layer3 = this.makeOscStack(ctx, droneRoot, [
-          { type: 'sawtooth', ratio: 2, gain: 0.1, detune: 8 },
-          { type: 'triangle', ratio: 3, gain: 0.08, detune: -5 },
-          { type: 'sawtooth', ratio: 4, gain: 0.05, detune: 6 },
-          { type: 'triangle', ratio: 6, gain: 0.035, detune: -4 }
-        ]);
-        const filter3 = ctx.createBiquadFilter();
-        filter3.type = 'lowpass';
-        filter3.frequency.value = 400;
-        filter3.Q.value = 2.8;
-        const phaser = this.makePhaser(ctx);
-        const amp3 = ctx.createGain();
-        amp3.gain.value = 0.16;
-        const delay3 = this.makeDelay(ctx, 1.05, 1.33, 0.26, 1600);
-        const dry3 = ctx.createGain();
-        dry3.gain.value = 0.18;
-        const wet3 = ctx.createGain();
-        wet3.gain.value = 0.5;
-
-        layer3.connect(filter3);
-        filter3.connect(phaser.input);
-        phaser.out.connect(dry3);
-        phaser.out.connect(delay3.input);
-        delay3.wet.connect(wet3);
-        dry3.connect(amp3);
-        wet3.connect(amp3);
-        amp3.connect(master);
-
-        // ---- Layer 4: soft bed sub (leave room for dub hits later) ----
-        const layer4 = this.makeOscStack(ctx, droneRoot, [
-          { type: 'sine', ratio: 0.5, gain: 0.22 },
-          { type: 'sine', ratio: 1, gain: 0.08, detune: 2 }
-        ]);
-        const amp4 = ctx.createGain();
-        amp4.gain.value = 0.18;
-        const tremLfo = ctx.createOscillator();
-        tremLfo.type = 'sine';
-        tremLfo.frequency.value = 0.07;
-        const tremDepth = ctx.createGain();
-        tremDepth.gain.value = 0.08;
-        tremLfo.connect(tremDepth);
-        tremDepth.connect(amp4.gain);
-        tremLfo.start();
-        const delay4 = this.makeDelay(ctx, 1.4, 1.7, 0.24, 450);
-        const wet4 = ctx.createGain();
-        wet4.gain.value = 0.35;
-        layer4.connect(amp4);
-        amp4.connect(master);
-        amp4.connect(delay4.input);
-        delay4.wet.connect(wet4);
-        wet4.connect(master);
-
-        // ---- FX buses for peppered instruments → ensemble ----
-        const arpBus = ctx.createGain();
-        arpBus.gain.value = 0.045;
-        const arpFilter = ctx.createBiquadFilter();
-        arpFilter.type = 'lowpass';
-        arpFilter.frequency.value = 600;
-        arpFilter.Q.value = 3;
-        const arpDelay = this.makeDelay(ctx, 0.234, 0.469, 0.4, 2200);
-        arpBus.connect(arpFilter);
-        arpFilter.connect(arpDelay.input);
-        const arpDry = ctx.createGain();
-        arpDry.gain.value = 0.08;
-        arpFilter.connect(arpDry);
-        arpDry.connect(ensemble);
-        const arpWet = ctx.createGain();
-        arpWet.gain.value = 0.62;
-        arpDelay.wet.connect(arpWet);
-        arpWet.connect(ensemble);
-
-        // Sampled lead guitar → deep slow phaser → long delay (quiet Hillage)
-        const guitarBus = ctx.createGain();
-        guitarBus.gain.value = 0.09;
-        const guitarFilter = ctx.createBiquadFilter();
-        guitarFilter.type = 'lowpass';
-        guitarFilter.frequency.value = 2200;
-        guitarFilter.Q.value = 0.7;
-        const guitarPickup = ctx.createBiquadFilter();
-        guitarPickup.type = 'peaking';
-        guitarPickup.frequency.value = 1200;
-        guitarPickup.Q.value = 0.9;
-        guitarPickup.gain.value = 2.5;
-        const guitarPhaser = this.makePhaser(ctx);
-        guitarPhaser.lfo.frequency.value = 0.08; // deep & slow
-        guitarPhaser.depth.gain.value = 900;
-        guitarPhaser.wet.gain.value = 0.7;
-        guitarPhaser.dry.gain.value = 0.35;
-        // ~dotted delays at 64bpm (beat ≈ 0.9375s)
-        const guitarDelay = this.makeDelay(ctx, 0.9375, 1.406, 0.38, 2400);
-        guitarBus.connect(guitarPickup);
-        guitarPickup.connect(guitarFilter);
-        guitarFilter.connect(guitarPhaser.input);
-        guitarPhaser.out.connect(guitarDelay.input);
-        const gDry = ctx.createGain();
-        gDry.gain.value = 0.12;
-        guitarPhaser.out.connect(gDry);
-        gDry.connect(ensemble);
-        const gWet = ctx.createGain();
-        gWet.gain.value = 0.55;
-        guitarDelay.wet.connect(gWet);
-        gWet.connect(ensemble);
-
-        const fluteBus = ctx.createGain();
-        fluteBus.gain.value = 0.14;
-        const fluteDelay = this.makeDelay(ctx, 0.8, 1.05, 0.26, 2000);
-        fluteBus.connect(fluteDelay.input);
-        const fDry = ctx.createGain();
-        fDry.gain.value = 0.3;
-        fluteBus.connect(fDry);
-        fDry.connect(ensemble);
-        const fWet = ctx.createGain();
-        fWet.gain.value = 0.35;
-        fluteDelay.wet.connect(fWet);
-        fWet.connect(ensemble);
-
-        // Sitar — audible once ensemble is up
-        const sitarBus = ctx.createGain();
-        sitarBus.gain.value = 0.32;
-        const sitarTone = ctx.createBiquadFilter();
-        sitarTone.type = 'lowpass';
-        sitarTone.frequency.value = 4200;
-        sitarTone.Q.value = 0.7;
-        const sitarBite = ctx.createBiquadFilter();
-        sitarBite.type = 'peaking';
-        sitarBite.frequency.value = 1600;
-        sitarBite.Q.value = 1.4;
-        sitarBite.gain.value = 3.5;
-        const sitarDelay = this.makeDelay(ctx, 0.55, 0.72, 0.26, 3000);
-        sitarBus.connect(sitarBite);
-        sitarBite.connect(sitarTone);
-        sitarTone.connect(sitarDelay.input);
-        const sDry = ctx.createGain();
-        sDry.gain.value = 0.55;
-        sitarTone.connect(sDry);
-        sDry.connect(ensemble);
-        const sWet = ctx.createGain();
-        sWet.gain.value = 0.35;
-        sitarDelay.wet.connect(sWet);
-        sWet.connect(ensemble);
-
-        // Tabla — light colour over the 808
-        const tablaBus = ctx.createGain();
-        tablaBus.gain.value = 0.14;
-        const tablaTone = ctx.createBiquadFilter();
-        tablaTone.type = 'highshelf';
-        tablaTone.frequency.value = 2500;
-        tablaTone.gain.value = 0;
-        const tablaDelay = this.makeDelay(ctx, 0.208, 0.312, 0.16, 3500);
-        tablaBus.connect(tablaTone);
-        tablaTone.connect(tablaDelay.input);
-        const tDry = ctx.createGain();
-        tDry.gain.value = 0.7;
-        tablaTone.connect(tDry);
-        tDry.connect(ensemble);
-        const tWet = ctx.createGain();
-        tWet.gain.value = 0.16;
-        tablaDelay.wet.connect(tWet);
-        tWet.connect(ensemble);
-
-        // Quiet 808 kit
-        const drumBus = ctx.createGain();
-        drumBus.gain.value = 0.11;
-        const drumTone = ctx.createBiquadFilter();
-        drumTone.type = 'lowpass';
-        drumTone.frequency.value = 8000;
-        drumTone.Q.value = 0.5;
-        drumBus.connect(drumTone);
-        const drDry = ctx.createGain();
-        drDry.gain.value = 0.85;
-        drumTone.connect(drDry);
-        drDry.connect(ensemble);
-        const drumDelay = this.makeDelay(ctx, 0.312, 0.417, 0.14, 2800);
-        drumTone.connect(drumDelay.input);
-        const drWet = ctx.createGain();
-        drWet.gain.value = 0.12;
-        drumDelay.wet.connect(drWet);
-        drWet.connect(ensemble);
-
-        // Dub techno snare / FX — long delay, quiet
-        const dubHitBus = ctx.createGain();
-        dubHitBus.gain.value = 0.07;
-        const dubHitFilter = ctx.createBiquadFilter();
-        dubHitFilter.type = 'bandpass';
-        dubHitFilter.frequency.value = 1400;
-        dubHitFilter.Q.value = 1.1;
-        const dubHitDelay = this.makeDelay(ctx, 0.9375, 1.406, 0.48, 1600);
-        dubHitBus.connect(dubHitFilter);
-        dubHitFilter.connect(dubHitDelay.input);
-        const dhDry = ctx.createGain();
-        dhDry.gain.value = 0.25;
-        dubHitFilter.connect(dhDry);
-        dhDry.connect(ensemble);
-        const dhWet = ctx.createGain();
-        dhWet.gain.value = 0.7;
-        dubHitDelay.wet.connect(dhWet);
-        dhWet.connect(ensemble);
-
-        // Dubby sub — busier line, delayed
-        const dubBus = ctx.createGain();
-        dubBus.gain.value = 0.38;
-        const dubFilter = ctx.createBiquadFilter();
-        dubFilter.type = 'lowpass';
-        dubFilter.frequency.value = 160;
-        dubFilter.Q.value = 0.9;
-        const dubDelay = this.makeDelay(ctx, 0.417, 0.625, 0.3, 480);
-        dubBus.connect(dubFilter);
-        dubFilter.connect(dubDelay.input);
-        const dDry = ctx.createGain();
-        dDry.gain.value = 0.8;
-        dubFilter.connect(dDry);
-        dDry.connect(ensemble);
-        const dWet = ctx.createGain();
-        dWet.gain.value = 0.42;
-        dubDelay.wet.connect(dWet);
-        dWet.connect(ensemble);
-
-        const breath = (amp, rate, depth, base) => {
-          amp.gain.value = base;
-          const lfo = ctx.createOscillator();
-          lfo.type = 'sine';
-          lfo.frequency.value = rate;
-          const g = ctx.createGain();
-          g.gain.value = depth;
-          lfo.connect(g);
-          g.connect(amp.gain);
-          lfo.start();
-        };
-        breath(amp1, 0.011, 0.08, 0.28);
-        breath(amp2, 0.017, 0.1, 0.16);
-        breath(amp3, 0.009, 0.08, 0.12);
-        breath(amp4, 0.014, 0.05, 0.14);
-
-        master.gain.setTargetAtTime(0.38, ctx.currentTime, 3.5);
-
-        this.nodes = {
-          master, ensemble, filter1, filter2, filter3, polish1,
-          amp1, amp2, amp3, amp4,
-          delay1, delay2, delay3, delay4,
-          dry1, wet1, dry2, wet2, dry3, wet3, wet4,
-          phaser, arpBus, arpFilter, guitarBus, fluteBus, sitarBus, sitarTone,
-          guitarFilter, guitarPhaser, arpDelay, guitarDelay, fluteDelay, sitarDelay,
-          dubHitBus, dubHitFilter, dubHitDelay,
-          tablaBus, tablaDelay, drumBus, drumDelay, dubBus, dubFilter, dubDelay
-        };
-
-        const now = ctx.currentTime;
-        // Explicit up→down triangle sweeps (dir flips so they always come back down)
-        this.sweeps = [
-          { filter: filter1, start: now, dir: 1, low: 40, high: 560, seconds: 52, qBase: 8, qPeak: 3 },
-          { filter: filter2, start: now - 16, dir: -1, low: 70, high: 420, seconds: 38, qBase: 3.5, qPeak: 1.2 },
-          { filter: filter3, start: now - 24, dir: 1, low: 120, high: 700, seconds: 44, qBase: 3, qPeak: 1.2 },
-          { filter: arpFilter, start: now - 8, dir: 1, low: 280, high: 1200, seconds: 28, qBase: 2.5, qPeak: 1 }
-        ];
-      },
-
-      currentSection() {
-        return this.SECTIONS[this._sectionIndex % this.SECTIONS.length];
-      },
-
-      onBeat(beatIndex, when) {
-        const beatInBar = beatIndex % 4;
-        const sec = this.currentSection();
-
-        if (beatInBar === 0) {
-          this.scheduleBar(when, sec);
-          this._barInSection += 1;
-          if (this._barInSection >= sec.bars) {
-            this._barInSection = 0;
-            this._sectionIndex = (this._sectionIndex + 1) % this.SECTIONS.length;
-          }
-        }
-
-        // Occasional dub snare / delay FX on beat 2 or 4
-        if (this._ensembleLive && (beatInBar === 1 || beatInBar === 3)) {
-          if (Math.random() < 0.18) this.playDubSnare(when);
-          else if (Math.random() < 0.12) this.playTimedDelayFx(when);
-        }
-      },
-
-      scheduleBar(barStart, sec) {
-        const step = this.beatSec / 4;
-
-        // Quiet 808 groove — kicks/snares from kit, hats from varying pattern
-        if (sec.drums) {
-          const pat = this.DRUMS[sec.drums];
-          if (pat) {
-            pat.forEach((hit, i) => {
-              if (!hit || hit === 'h' || hit === 'o') return;
-              const t = barStart + i * step;
-              if (hit === 'k') this.play808Kick(t);
-              else if (hit === 's') this.play808Snare(t);
-            });
-          }
-        }
-
-        // Vary hi-hats every bar
-        const hatPat = this.HAT_VARS[Math.floor(Math.random() * this.HAT_VARS.length)];
-        hatPat.forEach((hit, i) => {
-          if (!hit) return;
-          const t = barStart + i * step;
-          // slight humanise
-          const wobble = (Math.random() - 0.5) * 0.008;
-          if (hit === 'h') this.play808Hat(t + wobble, false);
-          else if (hit === 'o') this.play808Hat(t + wobble, true);
-        });
-
-        // Tabla colour on top of the 808
-        if (sec.tabla) {
-          const pat = this.TABLA[sec.tabla];
-          if (pat) {
-            pat.forEach((hit, i) => {
-              if (hit) this.playTablaHit(hit, barStart + i * step);
-            });
-          }
-        }
-
-        // Busy dub bassline for the bar
-        if (sec.bass) {
-          const pat = this.BASS[sec.bass];
-          if (pat) this.scheduleBassBar(pat, barStart, step);
-        }
-
-        // Guitar on even bars in lead sections
-        if (sec.guitar && this._barInSection % 2 === 0) {
-          this.playGuitarBend(barStart + this.beatSec * 0.05);
-        }
-
-        // Quiet fast arpeggio runs every so often (not on fills)
-        if (sec.name !== 'fill' && Math.random() < 0.22) {
-          this.playFastArp(barStart + this.beatSec * (Math.random() < 0.5 ? 0 : 2));
-        }
-      },
-
-      // Classic 808 kick — sine pitch drop, soft
-      play808Kick(when) {
-        const ctx = this.ctx;
-        const bus = this.nodes.drumBus;
-        if (!bus) return;
-        const osc = ctx.createOscillator();
-        osc.type = 'sine';
-        const env = ctx.createGain();
-        osc.frequency.setValueAtTime(145, when);
-        osc.frequency.exponentialRampToValueAtTime(42, when + 0.12);
-        env.gain.setValueAtTime(0.001, when);
-        env.gain.linearRampToValueAtTime(0.55, when + 0.004);
-        env.gain.exponentialRampToValueAtTime(0.001, when + 0.38);
-        osc.connect(env);
-        env.connect(bus);
-        osc.start(when);
-        osc.stop(when + 0.42);
-      },
-
-      play808Snare(when) {
-        const ctx = this.ctx;
-        const bus = this.nodes.drumBus;
-        if (!bus) return;
-
-        const noiseBuf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.15), ctx.sampleRate);
-        const nd = noiseBuf.getChannelData(0);
-        for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
-        const noise = ctx.createBufferSource();
-        noise.buffer = noiseBuf;
-        const nF = ctx.createBiquadFilter();
-        nF.type = 'highpass';
-        nF.frequency.value = 900;
-        const nG = ctx.createGain();
-        nG.gain.setValueAtTime(0.001, when);
-        nG.gain.linearRampToValueAtTime(0.35, when + 0.003);
-        nG.gain.exponentialRampToValueAtTime(0.001, when + 0.12);
-        noise.connect(nF);
-        nF.connect(nG);
-        nG.connect(bus);
-
-        const tone = ctx.createOscillator();
-        tone.type = 'triangle';
-        tone.frequency.setValueAtTime(180, when);
-        tone.frequency.exponentialRampToValueAtTime(120, when + 0.06);
-        const tG = ctx.createGain();
-        tG.gain.setValueAtTime(0.001, when);
-        tG.gain.linearRampToValueAtTime(0.22, when + 0.003);
-        tG.gain.exponentialRampToValueAtTime(0.001, when + 0.1);
-        tone.connect(tG);
-        tG.connect(bus);
-
-        noise.start(when);
-        tone.start(when);
-        noise.stop(when + 0.16);
-        tone.stop(when + 0.12);
-      },
-
-      play808Hat(when, open) {
-        const ctx = this.ctx;
-        const bus = this.nodes.drumBus;
-        if (!bus) return;
-        const dur = open ? 0.18 : 0.045;
-        const noiseBuf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.2), ctx.sampleRate);
-        const nd = noiseBuf.getChannelData(0);
-        for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
-        const noise = ctx.createBufferSource();
-        noise.buffer = noiseBuf;
-        const hp = ctx.createBiquadFilter();
-        hp.type = 'highpass';
-        hp.frequency.value = 7000;
-        hp.Q.value = 0.7;
-        const bp = ctx.createBiquadFilter();
-        bp.type = 'bandpass';
-        bp.frequency.value = 9000;
-        bp.Q.value = 0.6;
-        const g = ctx.createGain();
-        g.gain.setValueAtTime(0.001, when);
-        g.gain.linearRampToValueAtTime(open ? 0.18 : 0.12, when + 0.002);
-        g.gain.exponentialRampToValueAtTime(0.001, when + dur);
-        noise.connect(hp);
-        hp.connect(bp);
-        bp.connect(g);
-        g.connect(bus);
-        noise.start(when);
-        noise.stop(when + dur + 0.02);
-      },
-
-      // Filtered snare into long dub delay — sparse, quiet
-      playDubSnare(when) {
-        const ctx = this.ctx;
-        const bus = this.nodes.dubHitBus;
-        if (!bus) return;
-        const noiseBuf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.22), ctx.sampleRate);
-        const nd = noiseBuf.getChannelData(0);
-        for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
-        const noise = ctx.createBufferSource();
-        noise.buffer = noiseBuf;
-        const bp = ctx.createBiquadFilter();
-        bp.type = 'bandpass';
-        bp.frequency.value = 1100 + Math.random() * 600;
-        bp.Q.value = 2.2;
-        const g = ctx.createGain();
-        g.gain.setValueAtTime(0.001, when);
-        g.gain.linearRampToValueAtTime(0.28, when + 0.004);
-        g.gain.exponentialRampToValueAtTime(0.001, when + 0.16);
-        noise.connect(bp);
-        bp.connect(g);
-        g.connect(bus);
-        // soft body tick
-        const tone = ctx.createOscillator();
-        tone.type = 'triangle';
-        tone.frequency.setValueAtTime(200, when);
-        tone.frequency.exponentialRampToValueAtTime(90, when + 0.08);
-        const tg = ctx.createGain();
-        tg.gain.setValueAtTime(0.001, when);
-        tg.gain.linearRampToValueAtTime(0.12, when + 0.003);
-        tg.gain.exponentialRampToValueAtTime(0.001, when + 0.1);
-        tone.connect(tg);
-        tg.connect(bus);
-        noise.start(when);
-        tone.start(when);
-        noise.stop(when + 0.22);
-        tone.stop(when + 0.12);
-      },
-
-      // Soft delay-throw FX on beat 2/4 — noise sweep or muted chord stab
-      playTimedDelayFx(when) {
-        const ctx = this.ctx;
-        const bus = this.nodes.dubHitBus;
-        if (!bus) return;
-        if (Math.random() < 0.55) {
-          const dur = 0.35;
-          const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * dur), ctx.sampleRate);
-          const d = buf.getChannelData(0);
-          let last = 0;
-          for (let i = 0; i < d.length; i++) {
-            last = (last + 0.03 * (Math.random() * 2 - 1)) / 1.03;
-            d[i] = last * 4 * (1 - i / d.length);
-          }
-          const src = ctx.createBufferSource();
-          src.buffer = buf;
-          const f = ctx.createBiquadFilter();
-          f.type = 'bandpass';
-          f.Q.value = 3;
-          f.frequency.setValueAtTime(400, when);
-          f.frequency.exponentialRampToValueAtTime(2400, when + dur);
-          const g = ctx.createGain();
-          g.gain.setValueAtTime(0.001, when);
-          g.gain.linearRampToValueAtTime(0.18, when + 0.02);
-          g.gain.exponentialRampToValueAtTime(0.001, when + dur);
-          src.connect(f);
-          f.connect(g);
-          g.connect(bus);
-          src.start(when);
-          src.stop(when + dur + 0.02);
-        } else {
-          // quiet dub-techno chord stab into the delay
-          ['1', 'b3', '5', 'b7'].forEach((deg, i) => {
-            const o = ctx.createOscillator();
-            o.type = i % 2 ? 'sawtooth' : 'triangle';
-            o.frequency.value = this.hz(deg, 2);
-            const f = ctx.createBiquadFilter();
-            f.type = 'lowpass';
-            f.frequency.setValueAtTime(900, when);
-            f.frequency.exponentialRampToValueAtTime(280, when + 0.4);
-            const g = ctx.createGain();
-            g.gain.setValueAtTime(0.001, when);
-            g.gain.linearRampToValueAtTime(0.04, when + 0.01);
-            g.gain.exponentialRampToValueAtTime(0.001, when + 0.45);
-            o.connect(f);
-            f.connect(g);
-            g.connect(bus);
-            o.start(when);
-            o.stop(when + 0.5);
+      /* ---- Solid struts along every dome edge (instanced, one draw call) ---- */
+      AFRAME.registerComponent('dome-struts', {
+        schema: {
+          radius: {type: 'number', default: 120},
+          detail: {type: 'int', default: 2},
+          thickness: {type: 'number', default: 0.7}
+        },
+        init: function () {
+          var Geo = THREE.IcosahedronBufferGeometry || THREE.IcosahedronGeometry;
+          var ico = new Geo(this.data.radius, this.data.detail);
+          var edges = new THREE.EdgesGeometry(ico);
+          var pos = edges.attributes.position;
+          var count = pos.count / 2;
+          var CylGeo = THREE.CylinderBufferGeometry || THREE.CylinderGeometry;
+          var cyl = new CylGeo(this.data.thickness, this.data.thickness, 1, 6, 1);
+          var mat = new THREE.MeshStandardMaterial({
+            color: 0x0a0d1c,
+            emissive: 0x2233ff,
+            emissiveIntensity: 0.3,
+            metalness: 0.6,
+            roughness: 0.4
           });
-        }
-      },
-
-      // Synthetic tabla bols — quieter colour over the 808
-      playTablaHit(bol, when) {
-        const ctx = this.ctx;
-        const bus = this.nodes.tablaBus;
-        if (!bus) return;
-
-        const specs = {
-          D: { pitch: 95, noise: 0.12, noiseDecay: 0.07, body: 0.28, bodyDecay: 0.16, bright: 900 },
-          G: { pitch: 70, noise: 0.07, noiseDecay: 0.05, body: 0.24, bodyDecay: 0.18, bright: 500 },
-          K: { pitch: 55, noise: 0.1, noiseDecay: 0.04, body: 0.18, bodyDecay: 0.07, bright: 400 },
-          T: { pitch: 280, noise: 0.1, noiseDecay: 0.045, body: 0.16, bodyDecay: 0.09, bright: 2200 },
-          N: { pitch: 340, noise: 0.08, noiseDecay: 0.04, body: 0.14, bodyDecay: 0.08, bright: 2600 },
-          R: { pitch: 420, noise: 0.07, noiseDecay: 0.035, body: 0.12, bodyDecay: 0.07, bright: 3200 }
-        };
-        const s = specs[bol] || specs.T;
-
-        const noiseBuf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.08), ctx.sampleRate);
-        const nd = noiseBuf.getChannelData(0);
-        for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
-        const noise = ctx.createBufferSource();
-        noise.buffer = noiseBuf;
-        const nF = ctx.createBiquadFilter();
-        nF.type = 'bandpass';
-        nF.frequency.value = s.bright;
-        nF.Q.value = 1.2;
-        const nG = ctx.createGain();
-        nG.gain.setValueAtTime(0.001, when);
-        nG.gain.linearRampToValueAtTime(s.noise, when + 0.004);
-        nG.gain.exponentialRampToValueAtTime(0.001, when + s.noiseDecay);
-        noise.connect(nF);
-        nF.connect(nG);
-        nG.connect(bus);
-
-        const osc = ctx.createOscillator();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(s.pitch * 1.35, when);
-        osc.frequency.exponentialRampToValueAtTime(s.pitch, when + 0.03);
-        const oG = ctx.createGain();
-        oG.gain.setValueAtTime(0.001, when);
-        oG.gain.linearRampToValueAtTime(s.body, when + 0.005);
-        oG.gain.exponentialRampToValueAtTime(0.001, when + s.bodyDecay);
-        osc.connect(oG);
-        oG.connect(bus);
-
-        noise.start(when);
-        osc.start(when);
-        noise.stop(when + 0.1);
-        osc.stop(when + s.bodyDecay + 0.05);
-      },
-
-      scheduleBassBar(pat, barStart, step) {
-        let i = 0;
-        while (i < pat.length) {
-          const note = pat[i];
-          if (!note) {
-            i += 1;
-            continue;
+          var mesh = new THREE.InstancedMesh(cyl, mat, count);
+          var up = new THREE.Vector3(0, 1, 0);
+          var a = new THREE.Vector3(), b = new THREE.Vector3();
+          var mid = new THREE.Vector3(), dir = new THREE.Vector3();
+          var q = new THREE.Quaternion(), s = new THREE.Vector3();
+          var m = new THREE.Matrix4();
+          for (var i = 0; i < count; i++) {
+            a.fromBufferAttribute(pos, i * 2);
+            b.fromBufferAttribute(pos, i * 2 + 1);
+            mid.addVectors(a, b).multiplyScalar(0.5);
+            dir.subVectors(b, a);
+            var len = dir.length();
+            q.setFromUnitVectors(up, dir.normalize());
+            s.set(1, len, 1);
+            m.compose(mid, q, s);
+            mesh.setMatrixAt(i, m);
           }
-          let len = 1;
-          while (i + len < pat.length && pat[i + len] == null) len += 1;
-          // Cap sustain so busy lines stay punchy; leave a tiny gap
-          const sixteenths = Math.min(len, 4);
-          this.playDubNote(note.deg, note.oct, barStart + i * step, sixteenths * step * 0.88);
-          i += len;
+          mesh.instanceMatrix.needsUpdate = true;
+          this.el.setObject3D('struts', mesh);
         }
-      },
+      });
 
-      // Dubby bass note — sine + octave, short slides
-      playDubNote(deg, oct, when, dur) {
-        const ctx = this.ctx;
-        const bus = this.nodes.dubBus;
-        if (!bus) return;
-        const f = this.hz(deg, oct);
-        const level = oct < 0 ? 0.7 : 0.55;
-
-        const osc = ctx.createOscillator();
-        osc.type = 'sine';
-        const sub2 = ctx.createOscillator();
-        sub2.type = 'sine';
-        sub2.frequency.value = f * 2;
-        const mix = ctx.createGain();
-        const g1 = ctx.createGain();
-        g1.gain.value = 0.88;
-        const g2 = ctx.createGain();
-        g2.gain.value = 0.18;
-        osc.connect(g1);
-        sub2.connect(g2);
-        g1.connect(mix);
-        g2.connect(mix);
-
-        const env = ctx.createGain();
-        env.gain.setValueAtTime(0.001, when);
-        env.gain.linearRampToValueAtTime(level, when + 0.02);
-        env.gain.setValueAtTime(level * 0.75, when + dur * 0.5);
-        env.gain.linearRampToValueAtTime(0.001, when + dur);
-
-        osc.frequency.setValueAtTime(f * 1.04, when);
-        osc.frequency.exponentialRampToValueAtTime(f, when + 0.05);
-
-        mix.connect(env);
-        env.connect(bus);
-        osc.start(when);
-        sub2.start(when);
-        osc.stop(when + dur + 0.05);
-        sub2.stop(when + dur + 0.05);
-      },
-
-      triggerPepper() {
-        try {
-          const roll = Math.random();
-          if (roll < 0.35) this.playArpeggio();
-          else if (roll < 0.65) this.playSitar();
-          else this.playFlute();
-        } catch (e) {
-          console.warn('tunnel voice skipped', e);
-        }
-      },
-
-      playArpeggio() {
-        const ctx = this.ctx;
-        const bus = this.nodes.arpBus;
-        const t0 = ctx.currentTime + 0.05;
-        // A minor colour — matches dub bass (1 b3 4 5 b7)
-        const patterns = [
-          ['1', 'b3', '4', '5', 'b7', '5', '4', 'b3', '1'],
-          ['1', '5', 'b7', '5', '4', 'b3', '1'],
-          ['1', 'b3', '5', 'b7', '5', 'b3', '1'],
-          ['5', 'b7', '1', 'b3', '4', '5', '1']
-        ];
-        const pat = patterns[Math.floor(Math.random() * patterns.length)];
-        const baseOct = 3;
-        const step = this.beatSec / 2;
-
-        pat.forEach((deg, i) => {
-          const when = t0 + i * step;
-          const osc = ctx.createOscillator();
-          osc.type = 'sine';
-          osc.frequency.value = this.hz(deg, baseOct);
-          const g = ctx.createGain();
-          g.gain.setValueAtTime(0.001, when);
-          g.gain.linearRampToValueAtTime(0.08, when + 0.02);
-          g.gain.linearRampToValueAtTime(0.001, when + 0.26);
-          osc.connect(g);
-          g.connect(bus);
-          osc.start(when);
-          osc.stop(when + 0.32);
-        });
-      },
-
-      // Faster 16th arpeggio run into delay — quiet
-      playFastArp(startAt) {
-        const ctx = this.ctx;
-        const bus = this.nodes.arpBus;
-        if (!bus) return;
-        const t0 = startAt != null ? startAt : ctx.currentTime + 0.02;
-        const runs = [
-          ['1', 'b3', '4', '5', 'b7', '5', '4', 'b3'],
-          ['1', '4', '5', 'b7', '1', 'b7', '5', '4'],
-          ['5', 'b7', '1', 'b3', '4', 'b3', '1', 'b7'],
-          ['1', 'b3', '5', '1', 'b7', '5', 'b3', '1']
-        ];
-        const pat = runs[Math.floor(Math.random() * runs.length)];
-        const step = this.beatSec / 4; // 16ths
-        const filt = this.nodes.arpFilter;
-        if (filt) {
-          filt.frequency.cancelScheduledValues(t0);
-          filt.frequency.setValueAtTime(500, t0);
-          filt.frequency.linearRampToValueAtTime(2400, t0 + step * pat.length * 0.6);
-          filt.frequency.linearRampToValueAtTime(700, t0 + step * pat.length);
-        }
-        pat.forEach((deg, i) => {
-          const when = t0 + i * step;
-          const osc = ctx.createOscillator();
-          osc.type = Math.random() > 0.5 ? 'triangle' : 'sine';
-          osc.frequency.value = this.hz(deg, 3 + (i > 4 ? 1 : 0));
-          const g = ctx.createGain();
-          g.gain.setValueAtTime(0.001, when);
-          g.gain.linearRampToValueAtTime(0.055, when + 0.01);
-          g.gain.exponentialRampToValueAtTime(0.001, when + step * 0.9);
-          osc.connect(g);
-          g.connect(bus);
-          osc.start(when);
-          osc.stop(when + step + 0.05);
-        });
-      },
-
-      // Sampled lead guitar — quiet Hillage phrases, bends, filter, phaser+delay
-      playGuitarBend(startAt) {
-        const ctx = this.ctx;
-        const bus = this.nodes.guitarBus;
-        const gFilter = this.nodes.guitarFilter;
-        const t0 = startAt != null ? startAt : ctx.currentTime + 0.08;
-        const b = this.beatSec;
-        const useSample = !!this.guitarBuffer;
-        const base = this.guitarBaseHz || 440;
-        const rateFor = (hz) => hz / base;
-
-        // A minor phrases (match bass) — long bent notes
-        const riffs = [
-          [
-            { deg: '1', oct: 3, beats: 1.5 },
-            { deg: 'b3', oct: 3, beats: 1 },
-            { deg: '4', oct: 3, beats: 1 },
-            { deg: '5', oct: 3, beats: 2 },
-            { deg: 'b7', oct: 2, beats: 1.5 }
-          ],
-          [
-            { deg: '5', oct: 3, beats: 1 },
-            { deg: 'b7', oct: 2, beats: 1.5 },
-            { deg: '1', oct: 3, beats: 2 },
-            { deg: 'b3', oct: 3, beats: 1.5 }
-          ],
-          [
-            { deg: '1', oct: 3, beats: 0.75 },
-            { deg: '2', oct: 3, beats: 0.75 },
-            { deg: 'b3', oct: 3, beats: 1 },
-            { deg: '5', oct: 3, beats: 1.5 },
-            { deg: '4', oct: 3, beats: 1 },
-            { deg: '1', oct: 3, beats: 2 }
-          ],
-          [
-            { deg: 'b7', oct: 2, beats: 2 },
-            { deg: '1', oct: 3, beats: 1.5 },
-            { deg: '5', oct: 2, beats: 1.5 },
-            { deg: 'b7', oct: 2, beats: 2 }
-          ]
-        ];
-        const notes = riffs[Math.floor(Math.random() * riffs.length)];
-
-        const env = ctx.createGain();
-        env.gain.value = 0.001;
-        env.connect(bus);
-
-        let t = t0;
-        const firstHz = this.hz(notes[0].deg, notes[0].oct);
-        env.gain.setValueAtTime(0.001, t);
-        env.gain.linearRampToValueAtTime(0.11, t + 0.15);
-
-        if (gFilter) {
-          gFilter.frequency.cancelScheduledValues(t);
-          gFilter.frequency.setValueAtTime(900, t);
-          gFilter.frequency.linearRampToValueAtTime(2800, t + b * 2.5);
-          gFilter.Q.setValueAtTime(0.8, t);
-        }
-
-        const voices = [];
-        const startVoice = (fromHz, toHz, when, bendDur, hold) => {
-          if (useSample) {
-            const src = ctx.createBufferSource();
-            src.buffer = this.guitarBuffer;
-            src.playbackRate.setValueAtTime(rateFor(fromHz), when);
-            src.playbackRate.linearRampToValueAtTime(rateFor(toHz), when + bendDur);
-            src.playbackRate.setValueAtTime(rateFor(toHz), when + bendDur + hold);
-            src.connect(env);
-            src.start(when);
-            src.stop(when + bendDur + hold + 0.05);
-            voices.push(src);
+      /* ---- Rainbow nodes on every dome vertex ---- */
+      AFRAME.registerComponent('dome-nodes', {
+        schema: {
+          radius: {type: 'number', default: 120},
+          detail: {type: 'int', default: 2},
+          size: {type: 'number', default: 5}
+        },
+        init: function () {
+          var Geo = THREE.IcosahedronBufferGeometry || THREE.IcosahedronGeometry;
+          var geo = new Geo(this.data.radius, this.data.detail);
+          var verts = [];
+          if (geo.vertices && geo.vertices.length) {
+            verts = geo.vertices;
           } else {
-            const osc = ctx.createOscillator();
-            osc.type = 'sawtooth';
-            const warm = ctx.createOscillator();
-            warm.type = 'triangle';
-            warm.detune.value = 6;
-            const mix = ctx.createGain();
-            osc.connect(mix);
-            warm.connect(mix);
-            mix.gain.value = 0.5;
-            osc.frequency.setValueAtTime(fromHz, when);
-            warm.frequency.setValueAtTime(fromHz, when);
-            osc.frequency.linearRampToValueAtTime(toHz, when + bendDur);
-            warm.frequency.linearRampToValueAtTime(toHz, when + bendDur);
-            mix.connect(env);
-            osc.start(when);
-            warm.start(when);
-            osc.stop(when + bendDur + hold + 0.05);
-            warm.stop(when + bendDur + hold + 0.05);
-          }
-        };
-
-        // One continuous pitched voice following the phrase with bends
-        if (useSample) {
-          const src = ctx.createBufferSource();
-          src.buffer = this.guitarBuffer;
-          src.playbackRate.setValueAtTime(rateFor(firstHz / Math.pow(2, 1 / 12)), t0);
-          src.playbackRate.linearRampToValueAtTime(rateFor(firstHz), t0 + 0.35);
-          let cursor = t0;
-          notes.forEach((n, i) => {
-            const f = this.hz(n.deg, n.oct);
-            const bend = Math.min(0.9, n.beats * b * 0.55);
-            if (i === 0) {
-              cursor += n.beats * b;
-              return;
-            }
-            const from = f / Math.pow(2, 1 / 12);
-            src.playbackRate.setValueAtTime(rateFor(from), cursor);
-            src.playbackRate.linearRampToValueAtTime(rateFor(f), cursor + bend);
-            src.playbackRate.setValueAtTime(rateFor(f), cursor + bend + 0.02);
-            cursor += n.beats * b;
-          });
-          const end = cursor + b * 0.6;
-          src.connect(env);
-          src.start(t0);
-          src.stop(end + 0.05);
-          if (gFilter) {
-            gFilter.frequency.linearRampToValueAtTime(2600, Math.max(t0 + b * 2, cursor - b));
-            gFilter.frequency.linearRampToValueAtTime(700, end);
-          }
-          env.gain.setValueAtTime(0.09, cursor - b * 0.3);
-          env.gain.linearRampToValueAtTime(0.001, end);
-        } else {
-          startVoice(firstHz / Math.pow(2, 1 / 12), firstHz, t0, 0.35, notes[0].beats * b);
-          t = t0 + notes[0].beats * b;
-          notes.slice(1).forEach((n) => {
-            const f = this.hz(n.deg, n.oct);
-            const bend = Math.min(0.85, n.beats * b * 0.6);
-            startVoice(f / Math.pow(2, 1 / 12), f, t, bend, n.beats * b - bend);
-            t += n.beats * b;
-          });
-          const end = t + b * 0.5;
-          if (gFilter) gFilter.frequency.linearRampToValueAtTime(600, end);
-          env.gain.linearRampToValueAtTime(0.001, end);
-        }
-      },
-
-      playFlute() {
-        const ctx = this.ctx;
-        const bus = this.nodes.fluteBus;
-        const t0 = ctx.currentTime + 0.08;
-        const phrase = Math.random() > 0.4
-          ? [
-              { deg: '1', oct: 3, dur: 2.0 },
-              { deg: 'b7', oct: 2, dur: 1.8 },
-              { deg: '1', oct: 3, dur: 2.4 },
-              { deg: 'b7', oct: 3, dur: 1.6 }
-            ]
-          : [
-              { deg: 'b7', oct: 3, dur: 1.5 },
-              { deg: '1', oct: 3, dur: 1.8 },
-              { deg: '2', oct: 3, dur: 1.2 },
-              { deg: 'b7', oct: 3, dur: 1.4 },
-              { deg: '1', oct: 4, dur: 2.2 }
-            ];
-
-        let t = t0;
-        phrase.forEach((note, i) => {
-          const osc = ctx.createOscillator();
-          osc.type = 'sine';
-          const air = ctx.createOscillator();
-          air.type = 'triangle';
-          air.detune.value = 6;
-
-          const noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 0.5, ctx.sampleRate);
-          const data = noiseBuf.getChannelData(0);
-          for (let j = 0; j < data.length; j++) data[j] = Math.random() * 2 - 1;
-          const noise = ctx.createBufferSource();
-          noise.buffer = noiseBuf;
-          const noiseG = ctx.createGain();
-          noiseG.gain.value = 0.025;
-          const noiseF = ctx.createBiquadFilter();
-          noiseF.type = 'bandpass';
-          noiseF.frequency.value = 1800;
-          noiseF.Q.value = 0.6;
-          noise.connect(noiseF);
-          noiseF.connect(noiseG);
-
-          const f = this.hz(note.deg, note.oct);
-          const glide = 0.45 + Math.random() * 0.55;
-
-          if (i > 0) {
-            const prev = this.hz(phrase[i - 1].deg, phrase[i - 1].oct);
-            const overshoot = f > prev ? f * 1.025 : f * 0.975;
-            osc.frequency.setValueAtTime(prev, t);
-            air.frequency.setValueAtTime(prev, t);
-            osc.frequency.linearRampToValueAtTime(overshoot, t + glide * 0.75);
-            air.frequency.linearRampToValueAtTime(overshoot, t + glide * 0.75);
-            osc.frequency.linearRampToValueAtTime(f, t + glide);
-            air.frequency.linearRampToValueAtTime(f, t + glide);
-          } else {
-            osc.frequency.setValueAtTime(f * 0.97, t);
-            air.frequency.setValueAtTime(f * 0.97, t);
-            osc.frequency.linearRampToValueAtTime(f, t + 0.35);
-            air.frequency.linearRampToValueAtTime(f, t + 0.35);
-          }
-
-          const vib = ctx.createOscillator();
-          vib.frequency.value = 4.2 + Math.random();
-          const vibG = ctx.createGain();
-          vibG.gain.value = 5;
-          vib.connect(vibG);
-          vibG.connect(osc.frequency);
-
-          const env = ctx.createGain();
-          env.gain.setValueAtTime(0.001, t);
-          env.gain.linearRampToValueAtTime(0.38, t + 0.25);
-          env.gain.setValueAtTime(0.32, t + note.dur - 0.4);
-          env.gain.linearRampToValueAtTime(0.001, t + note.dur);
-
-          const filt = ctx.createBiquadFilter();
-          filt.type = 'lowpass';
-          filt.frequency.value = 2400;
-          filt.Q.value = 0.7;
-
-          osc.connect(filt);
-          air.connect(filt);
-          filt.connect(env);
-          noiseG.connect(env);
-          env.connect(bus);
-
-          osc.start(t);
-          air.start(t);
-          vib.start(t);
-          noise.start(t);
-          const stopAt = t + note.dur + 0.05;
-          osc.stop(stopAt);
-          air.stop(stopAt);
-          vib.stop(stopAt);
-          noise.stop(stopAt);
-
-          t += note.dur * (0.7 + Math.random() * 0.2);
-        });
-      },
-
-      // Sitar in A minor / komal — same world as the dub bass (no maj7 clash)
-      playSitar() {
-        const ctx = this.ctx;
-        const bus = this.nodes.sitarBus;
-        const t0 = ctx.currentTime + 0.15;
-
-        const root = this.hz('1', 2);
-        const flat3 = this.hz('b3', 2);
-        const fourth = this.hz('4', 2);
-        const fifth = this.hz('5', 2);
-        const flat7 = this.hz('b7', 2);
-        const rootHi = this.hz('1', 3);
-        const flat3Hi = this.hz('b3', 3);
-
-        const phrases = [
-          [root, flat3, fifth],
-          [fifth, flat7, rootHi],
-          [root, flat7, root],
-          [root, flat3, fourth, fifth],
-          [flat7, rootHi, flat3Hi, rootHi],
-          [root, fifth, flat7, rootHi],
-          [flat3, fourth, fifth, flat7, rootHi]
-        ];
-        const phrase = phrases[Math.floor(Math.random() * phrases.length)];
-
-        const useSample = !!this.sitarBuffer;
-        const base = this.sitarBaseHz || 523.25;
-        const rateFor = (hz) => hz / base;
-        const semitoneBelow = (hz) => hz / Math.pow(2, 1 / 12);
-
-        let t = t0;
-        phrase.forEach((hz) => {
-          const fromHz = semitoneBelow(hz);
-          const bendDur = 0.55 + Math.random() * 0.45;
-          const hold = 0.7 + Math.random() * 0.6;
-          const g = ctx.createGain();
-          g.gain.setValueAtTime(0.001, t);
-          g.gain.linearRampToValueAtTime(0.16, t + 0.08);
-          g.gain.setValueAtTime(0.12, t + bendDur + hold * 0.5);
-          g.gain.linearRampToValueAtTime(0.001, t + bendDur + hold);
-          g.connect(bus);
-
-          const targetRate = rateFor(hz);
-          const fromRate = rateFor(fromHz);
-
-          if (useSample) {
-            const src = ctx.createBufferSource();
-            src.buffer = this.sitarBuffer;
-            src.playbackRate.setValueAtTime(fromRate, t);
-            src.playbackRate.linearRampToValueAtTime(targetRate, t + bendDur);
-            src.playbackRate.setValueAtTime(targetRate, t + bendDur + hold);
-            src.connect(g);
-            src.start(t);
-            src.stop(t + bendDur + hold + 0.05);
-          } else {
-            const osc = ctx.createOscillator();
-            osc.type = 'sawtooth';
-            const body = ctx.createBiquadFilter();
-            body.type = 'bandpass';
-            body.frequency.value = hz * 2;
-            body.Q.value = 4;
-            osc.frequency.setValueAtTime(fromHz, t);
-            osc.frequency.linearRampToValueAtTime(hz, t + bendDur);
-            osc.connect(body);
-            body.connect(g);
-            osc.start(t);
-            osc.stop(t + bendDur + hold + 0.05);
-          }
-
-          t += bendDur + hold + 0.15;
-        });
-
-        this._nextPepperAt = Math.max(this._nextPepperAt || 0, t + 3);
-      },
-
-      animate() {
-        if (!this.running) return;
-        const ctx = this.ctx;
-        if (ctx.state === 'suspended') ctx.resume();
-        const n = this.nodes;
-        const t = ctx.currentTime;
-
-        // Fade ensemble in after ~1–2 min of drone alone
-        if (!this._ensembleLive && t >= this._ensembleInAt) {
-          this._ensembleLive = true;
-          const g = n.ensemble.gain;
-          g.cancelScheduledValues(t);
-          g.setValueAtTime(0.0001, t);
-          g.linearRampToValueAtTime(1, t + 12);
-          // Announce the groove with a sitar phrase
-          try { this.playSitar(); } catch (e) { /* ignore */ }
-          this._nextPepperAt = t + 14;
-        }
-
-        // Beat clock — only after ensemble starts
-        if (this._ensembleLive) {
-          let catchup = 0;
-          while (this._nextBeatAt && t >= this._nextBeatAt - 0.05) {
-            const when = Math.max(this._nextBeatAt, t + 0.02);
-            try {
-              this.onBeat(this._beatIndex, when);
-            } catch (e) {
-              console.warn('beat skipped', e);
-            }
-            this._beatIndex += 1;
-            this._nextBeatAt += this.beatSec;
-            if (++catchup > 8) {
-              this._nextBeatAt = t + this.beatSec;
-              break;
-            }
-          }
-
-          const sec = this.currentSection();
-          if (sec.pepper && t >= this._nextPepperAt) {
-            this._nextPepperAt = t + 8 + Math.random() * 10;
-            this.triggerPepper();
-          }
-        }
-
-        if (!this._lastMasterNudge || t > this._lastMasterNudge + 15) {
-          this._lastMasterNudge = t;
-          const cur = n.master.gain.value;
-          if (cur < 0.2 || cur > 0.55) {
-            n.master.gain.setTargetAtTime(0.38, t, 0.8);
-          }
-        }
-
-        // Cosine up/down sweeps — dir flips so cutoff always returns
-        this.sweeps.forEach((s, idx) => {
-          let phase = (t - s.start) / s.seconds;
-          if (phase >= 1) {
-            s.start = t;
-            s.dir *= -1;
-            phase = 0;
-            if (idx === 0) {
-              s.seconds = 44 + Math.random() * 24;
-              s.high = 380 + Math.random() * 220;
-              s.low = 35 + Math.random() * 20;
-            } else if (idx === 3) {
-              s.seconds = 22 + Math.random() * 16;
-              s.high = 1000 + Math.random() * 600;
-              s.low = 220 + Math.random() * 100;
-            } else {
-              s.seconds = 30 + Math.random() * 18;
-              s.high = 320 + Math.random() * 380;
-              s.low = 55 + Math.random() * 40;
-            }
-          }
-          const eased = 0.5 - 0.5 * Math.cos(Math.PI * Math.min(Math.max(phase, 0), 1));
-          const from = s.dir > 0 ? s.low : s.high;
-          const to = s.dir > 0 ? s.high : s.low;
-          s.filter.frequency.value = from + (to - from) * eased;
-          const qCap = idx === 0 ? 12 : 5;
-          const q = Math.min(qCap, s.qBase + Math.sin(eased * Math.PI) * s.qPeak);
-          s.filter.Q.value = q;
-        });
-
-        if (!this._nextNudge || t > this._nextNudge) {
-          this._nextNudge = t + 10 + Math.random() * 16;
-          const delays = [
-            n.delay1, n.delay2, n.delay3, n.delay4,
-            n.arpDelay, n.guitarDelay, n.fluteDelay, n.sitarDelay,
-            n.tablaDelay, n.drumDelay, n.dubDelay
-          ];
-          delays.forEach((d) => {
-            if (!d) return;
-            const amt = 0.18 + Math.random() * 0.12;
-            if (d.fbL) d.fbL.gain.setTargetAtTime(amt, t, 4);
-            if (d.fbR) d.fbR.gain.setTargetAtTime(amt, t, 4);
-            if (d.fb && !d.fbL) d.fb.gain.setTargetAtTime(amt, t, 4);
-          });
-          n.phaser.depth.gain.setTargetAtTime(300 + Math.random() * 300, t, 6);
-          n.phaser.lfo.frequency.setTargetAtTime(0.01 + Math.random() * 0.015, t, 8);
-          // Keep drone mostly delayed / quiet
-          n.wet1.gain.setTargetAtTime(0.5 + Math.random() * 0.15, t, 5);
-          n.dry1.gain.setTargetAtTime(0.18 + Math.random() * 0.08, t, 5);
-          n.wet2.gain.setTargetAtTime(0.45 + Math.random() * 0.15, t, 5);
-          n.wet3.gain.setTargetAtTime(0.42 + Math.random() * 0.15, t, 5);
-        }
-
-        requestAnimationFrame(() => this.animate());
-      }
-    };
-
-
-
-    AFRAME.registerComponent('hex-tunnel', {
-      schema: {
-        speed: { type: 'number', default: 0.052 }
-      },
-
-      init() {
-        this.SIDES = 6;
-        this.RADIUS = 2.4;
-        this.SEG_LEN = 0.7;
-        this.SEG_COUNT = 110;
-        this.WALL_THICK = 0.1;
-        this.WHITE_EVERY = 18;
-        this.PLANE_SIZE = 0.3;
-        this.PLANE_GAP = 0.55;
-        this.PLANES_PER_LINE = 36;
-        this.camZ = 0;
-        this.segments = [];
-        this.cornerPlanes = [];
-        this._lastColors = new Map();
-        this.rig = document.querySelector('#rig');
-        this.moodLight = document.querySelector('#mood-light');
-        this.cubeLight = document.querySelector('#cube-light');
-
-        this.buildTunnel();
-        this.buildCornerPlanes();
-        this.buildWallLights();
-        this._nextFxAt = 0;
-      },
-
-      hueColor(t) {
-        const h = ((t % 1) + 1) % 1;
-        const l = 0.5;
-        const a = Math.min(l, 1 - l);
-        const f = (n) => {
-          const k = (n + h * 12) % 12;
-          return l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
-        };
-        const hex = (v) => Math.round(v * 255).toString(16).padStart(2, '0');
-        return `#${hex(f(0))}${hex(f(8))}${hex(f(4))}`;
-      },
-
-      colorAtDepth(z) {
-        const slice = Math.floor(-z / this.SEG_LEN + 1e-6);
-        if (slice > 0 && slice % this.WHITE_EVERY === 0) return '#ffffff';
-        // Rainbow hues shift often as you fly
-        return this.hueColor(slice * 0.045);
-      },
-
-      paintSegment(seg) {
-        const color = this.colorAtDepth(seg.object3D.position.z);
-        if (this._lastColors.get(seg) === color) return;
-        this._lastColors.set(seg, color);
-
-        const isWhite = color === '#ffffff';
-        seg.querySelectorAll('a-box').forEach((wall) => {
-          const mesh = wall.getObject3D('mesh');
-          if (mesh && mesh.material) {
-            mesh.material.color.set(color);
-            mesh.material.emissive.set(color);
-            mesh.material.emissiveIntensity = isWhite ? 1.0 : 0.6;
-            mesh.material.needsUpdate = true;
-          } else {
-            wall.setAttribute(
-              'material',
-              `color: ${color}; emissive: ${color}; emissiveIntensity: ${isWhite ? 1.0 : 0.6}; metalness: 0.2; roughness: 0.5; side: double`
-            );
-          }
-        });
-      },
-
-      buildTunnel() {
-        const sideLen = 2 * this.RADIUS * Math.tan(Math.PI / this.SIDES) + 0.08;
-
-        for (let s = 0; s < this.SEG_COUNT; s++) {
-          const group = document.createElement('a-entity');
-          group.setAttribute('position', `0 0 ${-s * this.SEG_LEN}`);
-
-          for (let i = 0; i < this.SIDES; i++) {
-            const angle = (i + 0.5) * (Math.PI * 2 / this.SIDES);
-            const x = Math.sin(angle) * this.RADIUS;
-            const y = Math.cos(angle) * this.RADIUS;
-            const roll = (-angle * 180) / Math.PI;
-
-            const wall = document.createElement('a-box');
-            wall.setAttribute('width', sideLen);
-            wall.setAttribute('height', this.WALL_THICK);
-            wall.setAttribute('depth', this.SEG_LEN + 0.05);
-            wall.setAttribute('position', `${x} ${y} 0`);
-            wall.setAttribute('rotation', `0 0 ${roll}`);
-            wall.setAttribute(
-              'material',
-              'color: #ff0040; emissive: #ff0040; emissiveIntensity: 0.6; metalness: 0.2; roughness: 0.5; side: double'
-            );
-            group.appendChild(wall);
-          }
-
-          this.el.appendChild(group);
-          this.segments.push(group);
-        }
-        this.segments.forEach((seg) => this.paintSegment(seg));
-      },
-
-      buildCornerPlanes() {
-        const cornerR = (this.RADIUS / Math.cos(Math.PI / this.SIDES)) * 0.8;
-
-        for (let c = 0; c < this.SIDES; c++) {
-          const angle = c * (Math.PI * 2 / this.SIDES);
-          const cx = Math.sin(angle) * cornerR;
-          const cy = Math.cos(angle) * cornerR;
-          const planes = [];
-
-          for (let i = 0; i < this.PLANES_PER_LINE; i++) {
-            const plane = document.createElement('a-plane');
-            plane.setAttribute('width', this.PLANE_SIZE);
-            plane.setAttribute('height', this.PLANE_SIZE);
-            plane.setAttribute('position', `${cx} ${cy} ${-i * this.PLANE_GAP}`);
-            plane.setAttribute(
-              'material',
-              'color: #ffff00; emissive: #ffe600; emissiveIntensity: 0.85; side: double; metalness: 0.35; roughness: 0.3'
-            );
-            const dur = 14000;
-            plane.setAttribute(
-              'animation',
-              `property: rotation; to: 0 0 360; loop: true; dur: ${dur}; delay: ${(i / this.PLANES_PER_LINE) * dur}; easing: linear`
-            );
-            this.el.appendChild(plane);
-            planes.push(plane);
-          }
-          this.cornerPlanes.push({ planes });
-        }
-      },
-
-      recycle() {
-        const tunnelLen = this.SEG_COUNT * this.SEG_LEN;
-        const nearPad = this.SEG_LEN * 2;
-
-        this.segments.forEach((seg) => {
-          while (seg.object3D.position.z > this.camZ + nearPad) {
-            seg.object3D.position.z -= tunnelLen;
-            this._lastColors.delete(seg);
-          }
-        });
-
-        const planeDepth = this.PLANES_PER_LINE * this.PLANE_GAP;
-        this.cornerPlanes.forEach(({ planes }) => {
-          planes.forEach((plane) => {
-            while (plane.object3D.position.z > this.camZ + this.PLANE_GAP * 2) {
-              plane.object3D.position.z -= planeDepth;
-            }
-          });
-        });
-      },
-
-      buildWallLights() {
-        // Soft emissive rings / glyphs that drift toward the camera
-        this.wallFx = [];
-        for (let i = 0; i < 10; i++) {
-          const ring = document.createElement('a-ring');
-          ring.setAttribute('radius-inner', '1.85');
-          ring.setAttribute('radius-outer', '2.05');
-          ring.setAttribute('segments-theta', '48');
-          ring.setAttribute(
-            'material',
-            'color: #88ffff; emissive: #44ddff; emissiveIntensity: 0.55; opacity: 0.35; transparent: true; side: double; shader: flat'
-          );
-          ring.setAttribute('position', `0 0 ${-8 - i * 7}`);
-          this.el.appendChild(ring);
-          this.wallFx.push({ el: ring, kind: 'ring', speed: 0.012 + Math.random() * 0.01 });
-        }
-        for (let i = 0; i < 14; i++) {
-          const ang = Math.random() * Math.PI * 2;
-          const r = this.RADIUS * 0.92;
-          const spark = document.createElement('a-sphere');
-          spark.setAttribute('radius', 0.04 + Math.random() * 0.05);
-          spark.setAttribute(
-            'material',
-            `color: #ffe600; emissive: #ffaa00; emissiveIntensity: 0.9; opacity: 0.7; transparent: true; shader: flat`
-          );
-          spark.setAttribute(
-            'position',
-            `${Math.sin(ang) * r} ${Math.cos(ang) * r} ${-4 - Math.random() * 40}`
-          );
-          this.el.appendChild(spark);
-          this.wallFx.push({
-            el: spark,
-            kind: 'spark',
-            ang,
-            r,
-            bob: Math.random() * Math.PI * 2,
-            speed: 0.02 + Math.random() * 0.02
-          });
-        }
-      },
-
-      recycleWallFx() {
-        const far = this.camZ - 55;
-        const near = this.camZ + 2;
-        this.wallFx.forEach((fx) => {
-          const z = fx.el.object3D.position.z;
-          if (z > near) {
-            fx.el.object3D.position.z = far - Math.random() * 10;
-            if (fx.kind === 'spark') {
-              fx.ang = Math.random() * Math.PI * 2;
-              fx.el.object3D.position.x = Math.sin(fx.ang) * fx.r;
-              fx.el.object3D.position.y = Math.cos(fx.ang) * fx.r;
-            }
-          }
-        });
-      },
-
-      tick(time, delta) {
-        const step = this.data.speed * (delta / 16.67);
-        this.camZ -= step;
-        this.rig.object3D.position.z = this.camZ;
-        this.recycle();
-        this.segments.forEach((seg) => this.paintSegment(seg));
-
-        // Gentle wall emissive shimmer — doesn't change structure
-        const shimmer = 0.55 + 0.12 * Math.sin(time * 0.0015);
-        this.segments.forEach((seg, si) => {
-          if (si % 3 !== 0) return;
-          const walls = seg.querySelectorAll('a-box');
-          const w = walls[(si + (time / 400 | 0)) % walls.length];
-          if (!w) return;
-          const mesh = w.getObject3D('mesh');
-          if (mesh && mesh.material && mesh.material.emissiveIntensity != null) {
-            mesh.material.emissiveIntensity = shimmer + 0.15 * Math.sin(time * 0.003 + si);
-          }
-        });
-
-        if (this.wallFx) {
-          const dt = delta / 16.67;
-          this.wallFx.forEach((fx) => {
-            fx.el.object3D.position.z += fx.speed * dt * 0.35;
-            if (fx.kind === 'spark') {
-              fx.bob += 0.03 * dt;
-              const pulse = 0.92 + 0.08 * Math.sin(fx.bob);
-              fx.el.object3D.position.x = Math.sin(fx.ang + fx.bob * 0.15) * fx.r * pulse;
-              fx.el.object3D.position.y = Math.cos(fx.ang + fx.bob * 0.15) * fx.r * pulse;
-            } else {
-              // rings slowly scale opacity via material
-              const mat = fx.el.getObject3D('mesh') && fx.el.getObject3D('mesh').material;
-              if (mat) mat.opacity = 0.2 + 0.25 * (0.5 + 0.5 * Math.sin(time * 0.002 + fx.el.object3D.position.z));
-            }
-          });
-          this.recycleWallFx();
-        }
-
-        if (this.moodLight) {
-          const c = this.colorAtDepth(this.camZ - 4);
-          this.moodLight.setAttribute(
-            'light',
-            `type: point; color: ${c}; intensity: 0.65; distance: 28`
-          );
-          this.moodLight.object3D.position.set(0, 0, this.camZ - 5);
-        }
-      }
-    });
-
-    /**
-     * Place the cube in the tunnel ahead of the player along world −Z only.
-     * Never parent to the camera / never copy head quaternion — looking around
-     * must leave the cube behind in the tunnel (off-centre in the FOV).
-     */
-    AFRAME.registerComponent('tunnel-anchored-cube', {
-      schema: {
-        dist: { type: 'number', default: 2.4 },
-        lightOffset: { type: 'vec3', default: { x: 0.25, y: 0.25, z: 0.6 } }
-      },
-      init: function () {
-        this.rig = null;
-        this.light = null;
-        const scene = this.el.sceneEl;
-        if (scene && this.el.parentNode !== scene) {
-          scene.appendChild(this.el);
-        }
-      },
-      tick: function () {
-        if (!this.rig) this.rig = document.getElementById('rig');
-        if (!this.light) this.light = document.getElementById('cube-light');
-        if (!this.rig) return;
-        const cam = document.getElementById('cam');
-        if (cam && this.el.parentNode === cam) {
-          this.el.sceneEl.appendChild(this.el);
-        }
-        const z = this.rig.object3D.position.z - this.data.dist;
-        const x = this.rig.object3D.position.x;
-        const y = this.rig.object3D.position.y;
-        this.el.object3D.position.set(x, y, z);
-        if (this.light) {
-          const o = this.data.lightOffset;
-          this.light.object3D.position.set(x + o.x, y + o.y, z + o.z);
-        }
-      }
-    });
-
-    /** Psychedelic held object — hue-cycles, trails sparks, reacts when grabbed */
-    AFRAME.registerComponent('trippy-toy', {
-      schema: {
-        home: { type: 'vec3', default: { x: 0.28, y: -0.12, z: -0.55 } },
-        hueSpeed: { type: 'number', default: 40 }
-      },
-      init: function () {
-        this.grabbed = false;
-        this.rig = null;
-        this._lastPos = new AFRAME.THREE.Vector3();
-        this._tmp = new AFRAME.THREE.Vector3();
-        this.trail = [];
-        this.el.object3D.getWorldPosition(this._lastPos);
-        // A-Frame emits grabstarted/ended on the HAND — listen on scene
-        const scene = this.el.sceneEl;
-        this._onGrabStart = (e) => {
-          if (e.detail && e.detail.grabbedEl === this.el) this.grabbed = true;
-        };
-        this._onGrabEnd = (e) => {
-          if (e.detail && e.detail.grabbedEl === this.el) {
-            this.grabbed = false;
-            this._returnHome = true;
-          }
-        };
-        scene.addEventListener('grabstarted', this._onGrabStart);
-        scene.addEventListener('grabended', this._onGrabEnd);
-      },
-      remove: function () {
-        const scene = this.el.sceneEl;
-        if (!scene) return;
-        scene.removeEventListener('grabstarted', this._onGrabStart);
-        scene.removeEventListener('grabended', this._onGrabEnd);
-      },
-      spawnSpark: function (worldPos, hue) {
-        const scene = this.el.sceneEl;
-        if (!scene || this.trail.length > 48) return;
-        const spark = document.createElement('a-sphere');
-        const s = 0.02 + Math.random() * 0.045;
-        spark.setAttribute('radius', s);
-        spark.setAttribute('position', worldPos.x + ' ' + worldPos.y + ' ' + worldPos.z);
-        spark.setAttribute(
-          'material',
-          'shader: flat; color: hsl(' + (hue % 360) + ',100%,60%); ' +
-          'emissive: hsl(' + (hue % 360) + ',100%,45%); emissiveIntensity: 1; ' +
-          'transparent: true; opacity: 0.9; depthWrite: false'
-        );
-        scene.appendChild(spark);
-        this.trail.push({
-          el: spark,
-          life: 0.7 + Math.random() * 0.5,
-          age: 0,
-          vx: (Math.random() - 0.5) * 0.35,
-          vy: (Math.random() - 0.5) * 0.35,
-          vz: (Math.random() - 0.5) * 0.15
-        });
-      },
-      tick: function (t, dtMs) {
-        const dt = Math.min(0.05, (dtMs || 16) / 1000);
-        if (!this.rig) this.rig = document.getElementById('rig');
-        const cam = document.getElementById('cam');
-        const hue = (t * 0.001 * this.data.hueSpeed) % 360;
-        const bright = this.grabbed ? 0.95 : 0.55;
-        this.el.setAttribute(
-          'material',
-          'color: hsl(' + hue + ',95%,58%); metalness: 0.35; roughness: 0.12; ' +
-          'emissive: hsl(' + ((hue + 40) % 360) + ',100%,40%); emissiveIntensity: ' + bright + '; ' +
-          'transparent: true; opacity: 0.92'
-        );
-
-        // Do not touch pose while A-Frame is holding us (matrix owned by grab)
-        if (this.grabbed) {
-          this.el.object3D.getWorldPosition(this._tmp);
-          const moved = this._tmp.distanceTo(this._lastPos);
-          if (moved > 0.012) {
-            for (let i = 0; i < 3; i++) this.spawnSpark(this._tmp, hue + i * 25);
-          }
-          this._lastPos.copy(this._tmp);
-        } else if (cam && this.rig) {
-          // Home at CHEST / hand height in front of the camera (not the floor!)
-          const h = this.data.home;
-          const bob = Math.sin(t * 0.0025) * 0.03;
-          cam.object3D.getWorldPosition(this._tmp);
-          const forward = new AFRAME.THREE.Vector3(0, 0, -1).applyQuaternion(cam.object3D.getWorldQuaternion(new AFRAME.THREE.Quaternion()));
-          const right = new AFRAME.THREE.Vector3(1, 0, 0).applyQuaternion(cam.object3D.getWorldQuaternion(new AFRAME.THREE.Quaternion()));
-          const target = this._lastPos;
-          target.copy(this._tmp)
-            .addScaledVector(forward, Math.abs(h.z) || 0.45)
-            .addScaledVector(right, h.x)
-            .add(new AFRAME.THREE.Vector3(0, h.y + bob, 0));
-          if (this.el.parentNode !== this.el.sceneEl) {
-            this.el.sceneEl.appendChild(this.el);
-          }
-          this.el.object3D.position.lerp(target, 1 - Math.pow(0.0008, dt));
-          this.el.object3D.rotation.y += 0.7 * dt;
-          this.el.object3D.rotation.x += 0.4 * dt;
-        }
-
-        // Age trail sparks
-        for (let i = this.trail.length - 1; i >= 0; i--) {
-          const s = this.trail[i];
-          s.age += dt;
-          if (!s.el.parentNode) {
-            this.trail.splice(i, 1);
-            continue;
-          }
-          const p = s.el.object3D.position;
-          p.x += s.vx * dt;
-          p.y += s.vy * dt;
-          p.z += s.vz * dt;
-          const u = 1 - s.age / s.life;
-          s.el.setAttribute('material', 'opacity', Math.max(0, u * 0.9));
-          if (s.age >= s.life) {
-            s.el.parentNode.removeChild(s.el);
-            this.trail.splice(i, 1);
-          }
-        }
-
-        const light = this.el.querySelector('[light]');
-        if (light) {
-          light.setAttribute(
-            'light',
-            'type: point; color: hsl(' + hue + ',100%,65%); intensity: ' +
-            (this.grabbed ? 2.4 : 1.1) + '; distance: 4'
-          );
-        }
-      }
-    });
-
-    /**
-     * Colourful fidget spinner — pinch to grab, flick to spin.
-     * Uses A-Frame hand-tracking-grab-controls + local spin physics.
-     */
-    AFRAME.registerComponent('fidget-spinner', {
-      schema: {
-        side: { type: 'number', default: 0.22 }
-      },
-      init: function () {
-        this.grabbed = false;
-        this.spinVel = 6;
-        this._prevPinch = null;
-        this._tmp = new AFRAME.THREE.Vector3();
-        this._tmp2 = new AFRAME.THREE.Vector3();
-        this._quat = new AFRAME.THREE.Quaternion();
-        this._quat2 = new AFRAME.THREE.Quaternion();
-        this.rotor = this.el.querySelector('.rotor');
-        const scene = this.el.sceneEl;
-        this._onGrabStart = (e) => {
-          if (e.detail && e.detail.grabbedEl === this.el) {
-            this.grabbed = true;
-            this.spinVel *= 0.3;
-          }
-        };
-        this._onGrabEnd = (e) => {
-          if (e.detail && e.detail.grabbedEl === this.el) {
-            this.grabbed = false;
-            // Flick boost from recent motion
-            if (this._flick) {
-              this.spinVel += this._flick;
-              this._flick = 0;
-            } else {
-              this.spinVel += 4 + Math.random() * 8;
-            }
-            this._returnHome = true;
-          }
-        };
-        scene.addEventListener('grabstarted', this._onGrabStart);
-        scene.addEventListener('grabended', this._onGrabEnd);
-
-        // Track pinch motion while held to add spin
-        ['leftHand', 'rightHand'].forEach((id) => {
-          const hand = document.getElementById(id);
-          if (!hand) return;
-          hand.addEventListener('pinchmoved', (e) => {
-            if (!this.grabbed || !e.detail || !e.detail.position) return;
-            const p = e.detail.position;
-            if (this._prevPinch) {
-              const dx = p.x - this._prevPinch.x;
-              const dy = p.y - this._prevPinch.y;
-              this.spinVel += (dx + dy) * 40;
-              this._flick = (dx + dy) * 60;
-            }
-            if (!this._prevPinch) this._prevPinch = new AFRAME.THREE.Vector3();
-            this._prevPinch.set(p.x, p.y, p.z);
-          });
-          hand.addEventListener('pinchended', () => { this._prevPinch = null; });
-        });
-      },
-      tick: function (t, dtMs) {
-        const dt = Math.min(0.05, (dtMs || 16) / 1000);
-        const cam = document.getElementById('cam');
-        const hue = (t * 0.05) % 360;
-
-        // Spin the colourful arms
-        if (this.rotor) {
-          this.rotor.object3D.rotation.z += this.spinVel * dt;
-        }
-        // Friction — stays spinning a while
-        this.spinVel *= Math.pow(0.22, dt);
-        if (!this.grabbed && Math.abs(this.spinVel) < 1.2) {
-          this.spinVel += (this.spinVel >= 0 ? 1.2 : -1.2) - this.spinVel;
-        }
-
-        // Colour wash on lobes
-        const lobes = this.el.querySelectorAll('.lobe');
-        for (let i = 0; i < lobes.length; i++) {
-          const h = (hue + i * 120) % 360;
-          lobes[i].setAttribute(
-            'material',
-            'color: hsl(' + h + ',95%,58%); metalness: 0.55; roughness: 0.15; ' +
-            'emissive: hsl(' + h + ',100%,40%); emissiveIntensity: ' +
-            (0.45 + Math.min(1.2, Math.abs(this.spinVel) * 0.08))
-          );
-        }
-        const cap = this.el.querySelector('.cap');
-        if (cap) {
-          cap.setAttribute(
-            'material',
-            'color: #fff6c8; metalness: 0.9; roughness: 0.1; emissive: #ffe566; emissiveIntensity: 0.8'
-          );
-        }
-
-        // Soft glow light
-        const light = this.el.querySelector('[light]');
-        if (light) {
-          light.setAttribute(
-            'light',
-            'type: point; color: hsl(' + hue + ',100%,70%); intensity: ' +
-            (0.8 + Math.min(2, Math.abs(this.spinVel) * 0.12)) + '; distance: 3.5'
-          );
-        }
-
-        if (this.grabbed || !cam) return;
-
-        // Float at hand height in front of you
-        cam.object3D.getWorldPosition(this._tmp);
-        cam.object3D.getWorldQuaternion(this._quat);
-        const forward = this._tmp2.set(0, 0, -1).applyQuaternion(this._quat);
-        const right = new AFRAME.THREE.Vector3(1, 0, 0).applyQuaternion(this._quat);
-        const bob = Math.sin(t * 0.002) * 0.025;
-        const target = new AFRAME.THREE.Vector3()
-          .copy(this._tmp)
-          .addScaledVector(forward, 0.45)
-          .addScaledVector(right, this.data.side)
-          .add(new AFRAME.THREE.Vector3(0, -0.12 + bob, 0));
-        if (this.el.parentNode !== this.el.sceneEl) {
-          this.el.sceneEl.appendChild(this.el);
-        }
-        this.el.object3D.position.lerp(target, 1 - Math.pow(0.0005, dt));
-        // Face the user gently
-        this.el.object3D.quaternion.slerp(this._quat, 0.08);
-      }
-    });
-
-    /** Re-broadcast hand grab events on the scene (reliable for toys) */
-    AFRAME.registerComponent('grab-bus', {
-      init: function () {
-        const scene = this.el;
-        const bind = (hand) => {
-          if (!hand || hand._grabBus) return;
-          hand._grabBus = true;
-          hand.addEventListener('grabstarted', (e) => {
-            scene.emit('grabstarted', e.detail, false);
-          });
-          hand.addEventListener('grabended', (e) => {
-            scene.emit('grabended', e.detail, false);
-          });
-        };
-        const hook = () => {
-          bind(document.getElementById('leftHand'));
-          bind(document.getElementById('rightHand'));
-        };
-        hook();
-        this.el.addEventListener('loaded', hook);
-      }
-    });
-
-    /** Watch pinch on hands — spray sparks from palm */
-    AFRAME.registerComponent('hand-trippy', {
-      init: function () {
-        this.el.addEventListener('pinchstarted', (e) => {
-          const d = e.detail && e.detail.position;
-          if (!d) return;
-          const scene = this.el.sceneEl;
-          for (let i = 0; i < 8; i++) {
-            const spark = document.createElement('a-sphere');
-            spark.setAttribute('radius', 0.015 + Math.random() * 0.03);
-            spark.setAttribute('position', d.x + ' ' + d.y + ' ' + d.z);
-            const hue = (performance.now() * 0.08 + i * 40) % 360;
-            spark.setAttribute(
-              'material',
-              'shader: flat; color: hsl(' + hue + ',100%,65%); transparent: true; opacity: 0.95'
-            );
-            scene.appendChild(spark);
-            const vx = (Math.random() - 0.5) * 0.8;
-            const vy = (Math.random() - 0.5) * 0.8;
-            const vz = (Math.random() - 0.5) * 0.8;
-            let age = 0;
-            const iv = setInterval(() => {
-              age += 0.05;
-              if (!spark.parentNode || age > 0.7) {
-                clearInterval(iv);
-                if (spark.parentNode) spark.parentNode.removeChild(spark);
-                return;
+            var pos = geo.attributes.position;
+            var seen = {};
+            for (var i = 0; i < pos.count; i++) {
+              var k = pos.getX(i).toFixed(1) + '_' + pos.getY(i).toFixed(1) + '_' + pos.getZ(i).toFixed(1);
+              if (!seen[k]) {
+                seen[k] = 1;
+                verts.push(new THREE.Vector3(pos.getX(i), pos.getY(i), pos.getZ(i)));
               }
-              spark.object3D.position.x += vx * 0.05;
-              spark.object3D.position.y += vy * 0.05;
-              spark.object3D.position.z += vz * 0.05;
-            }, 50);
+            }
           }
-        });
+          this.verts = verts;
+          this.count = verts.length;
+          var positions = new Float32Array(this.count * 3);
+          this.colors = new Float32Array(this.count * 3);
+          verts.forEach(function (v, i) {
+            positions[i * 3] = v.x;
+            positions[i * 3 + 1] = v.y;
+            positions[i * 3 + 2] = v.z;
+          });
+          var bg = new THREE.BufferGeometry();
+          bg.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+          bg.setAttribute('color', new THREE.BufferAttribute(this.colors, 3));
+          var c = document.createElement('canvas');
+          c.width = c.height = 64;
+          var x = c.getContext('2d');
+          var grd = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+          grd.addColorStop(0, 'rgba(255,255,255,1)');
+          grd.addColorStop(0.4, 'rgba(255,255,255,0.9)');
+          grd.addColorStop(1, 'rgba(255,255,255,0)');
+          x.fillStyle = grd;
+          x.fillRect(0, 0, 64, 64);
+          var mat = new THREE.PointsMaterial({
+            size: this.data.size,
+            map: new THREE.CanvasTexture(c),
+            vertexColors: true,
+            transparent: true,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            sizeAttenuation: true
+          });
+          this.points = new THREE.Points(bg, mat);
+          this.el.setObject3D('nodes', this.points);
+          this.tmpColor = new THREE.Color();
+        },
+        tick: function (time) {
+          var t = time / 1000;
+          for (var i = 0; i < this.count; i++) {
+            var v = this.verts[i];
+            var hue = (t * 0.04 + v.y / (this.data.radius * 2) +
+                       Math.atan2(v.z, v.x) / (Math.PI * 2)) % 1;
+            if (hue < 0) { hue += 1; }
+            this.tmpColor.setHSL(hue, 0.85, 0.75);
+            this.colors[i * 3] = this.tmpColor.r;
+            this.colors[i * 3 + 1] = this.tmpColor.g;
+            this.colors[i * 3 + 2] = this.tmpColor.b;
+          }
+          this.points.geometry.attributes.color.needsUpdate = true;
+        }
+      });
+
+      /* ---- Bright rainbow material for the dodecahedron ---- */
+      AFRAME.registerComponent('rainbow-material', {
+        init: function () {
+          var canvas = document.createElement('canvas');
+          canvas.width = 512; canvas.height = 512;
+          var ctx2 = canvas.getContext('2d');
+          var grad = ctx2.createLinearGradient(0, 0, 512, 512);
+          var cols = ['#ff0033', '#ff9900', '#ffee00', '#00ee44', '#00ccff', '#2244ff', '#cc00ff'];
+          cols.forEach(function (c, i) { grad.addColorStop(i / (cols.length - 1), c); });
+          ctx2.fillStyle = grad;
+          ctx2.fillRect(0, 0, 512, 512);
+          var tex = new THREE.CanvasTexture(canvas);
+          var el = this.el;
+          function apply () {
+            var mesh = el.getObject3D('mesh');
+            if (!mesh) { return; }
+            mesh.material = new THREE.MeshStandardMaterial({
+              map: tex,
+              emissive: new THREE.Color(0xffffff),
+              emissiveMap: tex,
+              emissiveIntensity: 0.6,
+              flatShading: true,
+              metalness: 0.3,
+              roughness: 0.4
+            });
+          }
+          if (el.getObject3D('mesh')) { apply(); }
+          el.addEventListener('object3dset', apply);
+        }
+      });
+
+      /* ---- Circuit-board floor texture, drawn in code ---- */
+      AFRAME.registerComponent('circuit-material', {
+        init: function () {
+          var canvas = document.createElement('canvas');
+          canvas.width = 1024; canvas.height = 1024;
+          var ctx2 = canvas.getContext('2d');
+          ctx2.fillStyle = '#04070c';
+          ctx2.fillRect(0, 0, 1024, 1024);
+          ctx2.lineWidth = 3;
+          for (var i = 0; i < 150; i++) {
+            var x = Math.random() * 1024;
+            var y = Math.random() * 1024;
+            ctx2.strokeStyle = '#0a3f46';
+            ctx2.beginPath();
+            ctx2.moveTo(x, y);
+            for (var s = 0; s < 4; s++) {
+              if (Math.random() < 0.5) { x += (Math.random() - 0.5) * 260; }
+              else { y += (Math.random() - 0.5) * 260; }
+              ctx2.lineTo(x, y);
+            }
+            ctx2.stroke();
+            ctx2.fillStyle = '#0fe0d8';
+            ctx2.beginPath();
+            ctx2.arc(x, y, 5, 0, Math.PI * 2);
+            ctx2.fill();
+          }
+          var tex = new THREE.CanvasTexture(canvas);
+          tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+          tex.repeat.set(6, 6);
+          var el = this.el;
+          function apply () {
+            var mesh = el.getObject3D('mesh');
+            if (!mesh) { return; }
+            mesh.material = new THREE.MeshBasicMaterial({map: tex});
+          }
+          if (el.getObject3D('mesh')) { apply(); }
+          el.addEventListener('object3dset', apply);
+        }
+      });
+
+      /* ---- Volumetric club lasers: bright core + soft glow, additive,
+              gradient fade along the beam like light through haze ---- */
+      var laserTexCache = {};
+      function laserGradientTexture (color) {
+        if (laserTexCache[color]) { return laserTexCache[color]; }
+        var c = document.createElement('canvas');
+        c.width = 8; c.height = 256;
+        var x = c.getContext('2d');
+        var g = x.createLinearGradient(0, 0, 0, 256);
+        g.addColorStop(0, '#000000');       /* top of beam fades to nothing */
+        g.addColorStop(0.55, color);
+        g.addColorStop(1, color);           /* brightest at the source */
+        x.fillStyle = g;
+        x.fillRect(0, 0, 8, 256);
+        var tex = new THREE.CanvasTexture(c);
+        laserTexCache[color] = tex;
+        return tex;
       }
-    });
-  </script>
-</head>
-<body>
-  <div id="audio-gate"><span>Tap to enable sound &amp; enter<small>tunnel8 · pinch the fidget spinner · colourful hands</small></span></div>
-  <button type="button" id="audio-resume">Tap for sound</button>
+      AFRAME.registerComponent('laser-fan', {
+        schema: {
+          color: {default: '#00ff66'},
+          beams: {type: 'int', default: 6},
+          length: {type: 'number', default: 70},
+          spread: {type: 'number', default: 70},
+          spin: {type: 'number', default: 0.25},
+          sway: {type: 'number', default: 10}
+        },
+        init: function () {
+          var d = this.data;
+          var tex = laserGradientTexture(d.color);
+          var CylGeo = THREE.CylinderBufferGeometry || THREE.CylinderGeometry;
+          var coreGeo = new CylGeo(0.045, 0.045, d.length, 6, 1, true);
+          var glowGeo = new CylGeo(0.22, 0.22, d.length, 6, 1, true);
+          var coreMat = new THREE.MeshBasicMaterial({
+            map: tex, blending: THREE.AdditiveBlending, transparent: true,
+            depthWrite: false, side: THREE.DoubleSide
+          });
+          var glowMat = new THREE.MeshBasicMaterial({
+            map: tex, blending: THREE.AdditiveBlending, transparent: true,
+            depthWrite: false, side: THREE.DoubleSide, opacity: 0.18
+          });
+          this.glowMat = glowMat;
+          this.coreMat = coreMat;
+          var group = new THREE.Group();
+          for (var i = 0; i < d.beams; i++) {
+            var tilt = (-d.spread / 2 + (d.spread / (d.beams - 1)) * i) * Math.PI / 180;
+            var pivot = new THREE.Group();
+            pivot.rotation.z = tilt;
+            var core = new THREE.Mesh(coreGeo, coreMat);
+            core.position.y = d.length / 2;
+            var glow = new THREE.Mesh(glowGeo, glowMat);
+            glow.position.y = d.length / 2;
+            pivot.add(core);
+            pivot.add(glow);
+            group.add(pivot);
+          }
+          this.group = group;
+          this.el.setObject3D('fan', group);
+          this.phase = Math.random() * Math.PI * 2;
+        },
+        tick: function (time, dt) {
+          var t = time / 1000;
+          this.group.rotation.y += (dt / 1000) * this.data.spin * Math.PI * 2 * 0.07;
+          this.group.rotation.z = Math.sin(t * 0.12 + this.phase) *
+                                  this.data.sway * Math.PI / 180;
+          /* flicker like haze drifting through the beam */
+          var f = 0.5 + 0.18 * Math.sin(t * 4 + this.phase) * Math.sin(t * 1.7);
+          this.coreMat.opacity = f;
+          this.glowMat.opacity = 0.12 + 0.08 * f;
+        }
+      });
 
-  <a-scene
-    background="color: #000008"
-    fog="type: exponential; color: #000008; density: 0.006"
-    renderer="antialias: true; colorManagement: true; physicallyCorrectLights: true"
-    vr-mode-ui="enabled: true"
-    webxr="optionalFeatures: hand-tracking, local-floor, bounded-floor"
-    obb-collider="showColliders: false"
-    grab-bus
-  >
-    <a-entity light="type: ambient; color: #778899; intensity: 0.4"></a-entity>
-    <a-entity id="mood-light" light="type: point; color: #ff4080; intensity: 0.65; distance: 28" position="0 0 -5"></a-entity>
-    <a-entity light="type: point; color: #b8ffd0; intensity: 1.6; distance: 10" position="-0.8 0.3 -2.0"></a-entity>
-    <a-entity light="type: directional; color: #ffffff; intensity: 1.15" position="2 3 1"></a-entity>
+      /* ---- Drifting smoke / haze sprites ---- */
+      AFRAME.registerComponent('smoke', {
+        schema: {
+          count: {type: 'int', default: 45},
+          radius: {type: 'number', default: 95},
+          height: {type: 'number', default: 40},
+          opacity: {type: 'number', default: 0.12}
+        },
+        init: function () {
+          var c = document.createElement('canvas');
+          c.width = c.height = 128;
+          var x = c.getContext('2d');
+          var g = x.createRadialGradient(64, 64, 4, 64, 64, 64);
+          g.addColorStop(0, 'rgba(180,190,210,0.9)');
+          g.addColorStop(0.5, 'rgba(160,170,195,0.35)');
+          g.addColorStop(1, 'rgba(150,160,185,0)');
+          x.fillStyle = g;
+          x.fillRect(0, 0, 128, 128);
+          var tex = new THREE.CanvasTexture(c);
+          var group = new THREE.Group();
+          this.puffs = [];
+          for (var i = 0; i < this.data.count; i++) {
+            var mat = new THREE.SpriteMaterial({
+              map: tex, transparent: true, depthWrite: false,
+              opacity: this.data.opacity * (0.5 + Math.random() * 0.8),
+              rotation: Math.random() * Math.PI * 2
+            });
+            var sp = new THREE.Sprite(mat);
+            var ang = Math.random() * Math.PI * 2;
+            var r = Math.sqrt(Math.random()) * this.data.radius;
+            sp.position.set(Math.cos(ang) * r,
+                            Math.random() * this.data.height,
+                            Math.sin(ang) * r);
+            var sc = 18 + Math.random() * 22;
+            sp.scale.set(sc, sc, 1);
+            group.add(sp);
+            this.puffs.push({
+              sp: sp,
+              vy: 0.4 + Math.random() * 0.7,
+              vx: (Math.random() - 0.5) * 0.6,
+              vz: (Math.random() - 0.5) * 0.6,
+              vr: (Math.random() - 0.5) * 0.06
+            });
+          }
+          this.el.setObject3D('smoke', group);
+        },
+        tick: function (time, dt) {
+          var s = dt / 1000;
+          var h = this.data.height;
+          for (var i = 0; i < this.puffs.length; i++) {
+            var p = this.puffs[i];
+            p.sp.position.y += p.vy * s;
+            p.sp.position.x += p.vx * s;
+            p.sp.position.z += p.vz * s;
+            p.sp.material.rotation += p.vr * s;
+            if (p.sp.position.y > h) { p.sp.position.y = 0; }
+          }
+        }
+      });
 
-    <!-- Cube is NOT under the camera. World position updated along tunnel only. -->
-    <a-box
-      id="hero-cube"
-      tunnel-anchored-cube="dist: 2.4"
-      position="0 0 -2.4"
-      width="0.28"
-      height="0.28"
-      depth="0.28"
-      material="color: #7dffb0; metalness: 1; roughness: 0.06; emissive: #1a8f4a; emissiveIntensity: 0.35"
-      animation="property: rotation; to: 360 360 360; loop: true; dur: 28000; easing: linear"
-    ></a-box>
-    <a-entity id="cube-light" light="type: point; color: #ffffff; intensity: 3.2; distance: 8" position="0.25 0.25 -1.8"></a-entity>
+      /* =====================================================================
+         TWIN BROODING DRONES.
+         Two identical deep saw-stack voices (A0 root), each with its own
+         high-resonance lowpass starting almost closed. The second voice's
+         sweep starts 45 seconds behind the first, and its cycle is a
+         little longer (340s vs 300s), so the two resonant peaks are
+         forever crossing over each other in different places — shifting
+         interference between the cutoffs. Both feed the long feedback
+         delay and the big reverb. Nothing else. No plucks, no leads.
+         ===================================================================== */
+      var startResonateDrone = (function () {
+        var ctx, master, reverb, delay;
 
-    <!-- Fidget spinner — floats at hand height; pinch lobes to grab & flick -->
-    <a-entity
-      id="fidget"
-      grabbable
-      fidget-spinner="side: 0.2"
-      position="0.2 1.2 -0.45"
-      scale="1 1 1"
-    >
-      <a-entity light="type: point; color: #ff88ee; intensity: 1; distance: 3"></a-entity>
-      <!-- bearing / cap -->
-      <a-cylinder
-        class="cap"
-        radius="0.035"
-        height="0.028"
-        material="color: #fff6c8; metalness: 0.9; roughness: 0.1; emissive: #ffe566; emissiveIntensity: 0.7"
-      ></a-cylinder>
-      <a-entity class="rotor">
-        <a-sphere class="lobe" position="0.09 0 0" radius="0.048"
-          material="color: #ff4d9a; emissive: #ff2a7a; emissiveIntensity: 0.6"></a-sphere>
-        <a-sphere class="lobe" position="-0.045 0 0.078" radius="0.048"
-          material="color: #4dffc3; emissive: #22e0a0; emissiveIntensity: 0.6"></a-sphere>
-        <a-sphere class="lobe" position="-0.045 0 -0.078" radius="0.048"
-          material="color: #6a8cff; emissive: #4060ff; emissiveIntensity: 0.6"></a-sphere>
-        <!-- arms -->
-        <a-box position="0.045 0 0" width="0.08" height="0.016" depth="0.028"
-          material="color: #ffcc66; metalness: 0.6; roughness: 0.2; emissive: #ffaa22; emissiveIntensity: 0.35"></a-box>
-        <a-box position="-0.022 0 0.039" rotation="0 60 0" width="0.08" height="0.016" depth="0.028"
-          material="color: #88ffee; metalness: 0.6; roughness: 0.2; emissive: #44ddcc; emissiveIntensity: 0.35"></a-box>
-        <a-box position="-0.022 0 -0.039" rotation="0 -60 0" width="0.08" height="0.016" depth="0.028"
-          material="color: #c8a0ff; metalness: 0.6; roughness: 0.2; emissive: #9966ff; emissiveIntensity: 0.35"></a-box>
+        function send (from, to, amount) {
+          var g = ctx.createGain();
+          g.gain.value = amount;
+          from.connect(g);
+          g.connect(to);
+        }
+
+        /* one complete brooding voice: saw stack -> resonant swept lowpass */
+        function droneVoice (opts) {
+          var filter = ctx.createBiquadFilter();
+          filter.type = 'lowpass';
+          filter.Q.value = 14;
+          filter.frequency.setValueAtTime(opts.low, ctx.currentTime);
+
+          function sweep () {
+            var t = ctx.currentTime;
+            filter.frequency.setValueAtTime(opts.low, t);
+            filter.frequency.exponentialRampToValueAtTime(opts.high, t + opts.rise);
+            filter.frequency.exponentialRampToValueAtTime(opts.low, t + opts.rise + opts.fall);
+            setTimeout(sweep, (opts.rise + opts.fall) * 1000 - 100);
+          }
+          /* hold closed and brooding until this voice's turn comes */
+          setTimeout(sweep, opts.offset * 1000);
+
+          var vca = ctx.createGain();
+          vca.gain.setValueAtTime(0.0001, ctx.currentTime);
+          vca.gain.linearRampToValueAtTime(opts.gain, ctx.currentTime + 14);
+          filter.connect(vca);
+          vca.connect(master);
+          send(vca, reverb, 0.6);
+          send(vca, delay, 0.5);
+
+          /* the saw stack: A0 root, static pitches */
+          [[27.5, 'sawtooth', 0.5, 0],
+           [27.5, 'sawtooth', 0.35, -6],
+           [27.5, 'sawtooth', 0.35, 6],
+           [55, 'sawtooth', 0.15, 3],
+           [27.5, 'sine', 0.5, 0]].forEach(function (v) {
+            var o = ctx.createOscillator();
+            o.type = v[1];
+            o.frequency.value = v[0];
+            o.detune.value = v[3] + opts.detune;
+            var g = ctx.createGain();
+            g.gain.value = v[2];
+            o.connect(g);
+            g.connect(filter);
+            o.start();
+          });
+        }
+
+        /* ---------- wire it up ---------- */
+        return function start () {
+          if (ctx) { return; }
+          ctx = new (window.AudioContext || window.webkitAudioContext)();
+
+          master = ctx.createDynamicsCompressor();
+          var out = ctx.createGain();
+          out.gain.value = 0.9;
+          master.connect(out);
+          out.connect(ctx.destination);
+
+          /* ---- big soft reverb (generated impulse response) ---- */
+          var irLen = Math.floor(ctx.sampleRate * 4.5);
+          var ir = ctx.createBuffer(2, irLen, ctx.sampleRate);
+          for (var ch = 0; ch < 2; ch++) {
+            var d = ir.getChannelData(ch);
+            for (var i = 0; i < irLen; i++) {
+              d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / irLen, 2.5);
+            }
+          }
+          reverb = ctx.createConvolver();
+          reverb.buffer = ir;
+          var reverbGain = ctx.createGain();
+          reverbGain.gain.value = 0.9;
+          reverb.connect(reverbGain);
+          reverbGain.connect(master);
+
+          /* ---- long, hungry feedback delay ---- */
+          delay = ctx.createDelay(3);
+          delay.delayTime.value = 0.66;
+          var fb = ctx.createGain();
+          fb.gain.value = 0.62;
+          var fbLp = ctx.createBiquadFilter();
+          fbLp.type = 'lowpass';
+          fbLp.frequency.value = 2600;
+          delay.connect(fbLp);
+          fbLp.connect(fb);
+          fb.connect(delay);
+          var delayOut = ctx.createGain();
+          delayOut.gain.value = 0.65;
+          delay.connect(delayOut);
+          delayOut.connect(master);
+          send(delay, reverb, 0.5);
+
+          /* ---- the two voices ----
+             voice 2 trails voice 1 by 45s and runs a longer cycle,
+             so the crossover points never repeat the same way */
+          droneVoice({offset: 0,  rise: 150, fall: 150, low: 35, high: 720, detune: 0, gain: 0.15});
+          droneVoice({offset: 45, rise: 170, fall: 170, low: 35, high: 640, detune: 4, gain: 0.13});
+        };
+      })();
+    </script>
+  </head>
+
+  <body>
+    <!-- browsers block audio until a user gesture, so enter via a tap -->
+    <div id="enter"
+         style="position: fixed; inset: 0; z-index: 9999; display: flex;
+                align-items: center; justify-content: center; cursor: pointer;
+                background: rgba(2, 4, 12, 0.85); color: #8ff;
+                font-family: monospace; font-size: 22px; letter-spacing: 4px;">
+      &#9654; TAP TO ENTER RESONATE
+    </div>
+    <script>
+      document.getElementById('enter').addEventListener('click', function () {
+        this.style.display = 'none';
+        startResonateDrone();
+      });
+    </script>
+
+    <a-scene>
+      <a-assets>
+        <a-mixin id="cabinet"
+                 geometry="primitive: box; width: 9; height: 16; depth: 6"
+                 material="color: #b8bfd6; metalness: 0.2; roughness: 0.8"></a-mixin>
+        <a-mixin id="cone-big"
+                 geometry="primitive: cylinder; radius: 3; height: 0.6"
+                 rotation="90 0 0"
+                 material="color: #10131c; roughness: 0.9"></a-mixin>
+        <a-mixin id="cone-cap"
+                 geometry="primitive: cylinder; radius: 1.1; height: 0.4"
+                 rotation="90 0 0"
+                 material="color: #2a2f45; metalness: 0.6"></a-mixin>
+      </a-assets>
+
+      <a-entity environment="preset: starry; groundColor: #445; dressing: none"></a-entity>
+
+      <a-entity light="type: point; color: #fff; intensity: 4.2" position="50 90 0"></a-entity>
+      <a-entity light="type: ambient; intensity: 0.5"></a-entity>
+      <a-entity light="type: point; color: #00f; intensity: 2.8" position="0 80 10"></a-entity>
+
+      <!-- ============ THE DOME: solid struts + rainbow nodes ============ -->
+      <a-entity dome-struts="radius: 120; detail: 2; thickness: 0.7"></a-entity>
+      <a-entity geometry="primitive: icosphere; radius: 119; detail: 2"
+                material="color: #05060f; opacity: 0.25; transparent: true; side: back; shader: flat"></a-entity>
+      <a-entity dome-nodes="radius: 120; detail: 2; size: 5"></a-entity>
+
+      <!-- ============ SMOKE / HAZE ============ -->
+      <a-entity smoke="count: 45; radius: 95; height: 40; opacity: 0.12"></a-entity>
+
+      <!-- ============ FOUR SPEAKER STACKS ============ -->
+      <a-entity position="0 0 100" rotation="0 0 0">
+        <a-entity mixin="cabinet" position="0 8 0"></a-entity>
+        <a-entity mixin="cone-big" position="0 4.5 -3.1"></a-entity>
+        <a-entity mixin="cone-cap" position="0 4.5 -3.3"></a-entity>
+        <a-entity mixin="cone-big" position="0 11 -3.1"></a-entity>
+        <a-entity mixin="cone-cap" position="0 11 -3.3"></a-entity>
+        <a-box position="0 14.6 -3.1" width="5" height="2" depth="0.6" color="#10131c"></a-box>
       </a-entity>
-    </a-entity>
+      <a-entity position="0 0 -100" rotation="0 180 0">
+        <a-entity mixin="cabinet" position="0 8 0"></a-entity>
+        <a-entity mixin="cone-big" position="0 4.5 -3.1"></a-entity>
+        <a-entity mixin="cone-cap" position="0 4.5 -3.3"></a-entity>
+        <a-entity mixin="cone-big" position="0 11 -3.1"></a-entity>
+        <a-entity mixin="cone-cap" position="0 11 -3.3"></a-entity>
+        <a-box position="0 14.6 -3.1" width="5" height="2" depth="0.6" color="#10131c"></a-box>
+      </a-entity>
+      <a-entity position="100 0 0" rotation="0 90 0">
+        <a-entity mixin="cabinet" position="0 8 0"></a-entity>
+        <a-entity mixin="cone-big" position="0 4.5 -3.1"></a-entity>
+        <a-entity mixin="cone-cap" position="0 4.5 -3.3"></a-entity>
+        <a-entity mixin="cone-big" position="0 11 -3.1"></a-entity>
+        <a-entity mixin="cone-cap" position="0 11 -3.3"></a-entity>
+        <a-box position="0 14.6 -3.1" width="5" height="2" depth="0.6" color="#10131c"></a-box>
+      </a-entity>
+      <a-entity position="-100 0 0" rotation="0 -90 0">
+        <a-entity mixin="cabinet" position="0 8 0"></a-entity>
+        <a-entity mixin="cone-big" position="0 4.5 -3.1"></a-entity>
+        <a-entity mixin="cone-cap" position="0 4.5 -3.3"></a-entity>
+        <a-entity mixin="cone-big" position="0 11 -3.1"></a-entity>
+        <a-entity mixin="cone-cap" position="0 11 -3.3"></a-entity>
+        <a-box position="0 14.6 -3.1" width="5" height="2" depth="0.6" color="#10131c"></a-box>
+      </a-entity>
 
-    <!-- Extra soft orb to pinch too -->
-    <a-entity
-      id="prism-ball"
-      grabbable
-      trippy-toy="home: -0.25 -0.12 0.45; hueSpeed: 70"
-      position="-0.25 1.15 -0.42"
-      geometry="primitive: icosahedron; radius: 0.07"
-      material="color: #66ffcc; metalness: 0.5; roughness: 0.08; emissive: #22ffaa; emissiveIntensity: 0.65"
-    >
-      <a-entity light="type: point; color: #66ffcc; intensity: 1.0; distance: 3"></a-entity>
-    </a-entity>
+      <!-- ============ CENTRE STAGE ============ -->
+      <a-torus color="#e0201a" position="0 2.4 0" rotation="90 0 0"
+               radius="5" radius-tubular="1"
+               segments-tubular="6" segments-radial="12"
+               material="metalness: 0.3; roughness: 0.5"></a-torus>
+      <a-cylinder position="0 2 0" color="blue" height="0.1" radius="12" opacity="0.3"></a-cylinder>
 
-    <a-entity id="rig" position="0 0 0">
-      <a-camera
-        id="cam"
-        position="0 0 0"
-        look-controls="enabled: true"
-        wasd-controls="enabled: false"
-      ></a-camera>
-    </a-entity>
+      <a-box color="green" depth="2" height="2" width="2" position="0 2 10"
+             event-set__enter="_event: mouseenter; material.color: #8FF7FF"
+             event-set__leave="_event: mouseleave; material.color: green"></a-box>
+      <a-box color="blue" depth="2" height="2" width="2" position="0 2 -10"></a-box>
+      <a-box color="yellow" depth="2" height="2" width="2" position="10 2 0"></a-box>
+      <a-box color="red" depth="2" height="2" width="2" position="-10 2 0"></a-box>
 
-    <!-- Hands at scene root so XR poses / grab colliders stay correct -->
-    <a-entity
-      id="leftHand"
-      hand-tracking-controls="hand: left; modelStyle: mesh; modelColor: #9bffe0"
-      hand-tracking-grab-controls="hand: left; color: #9bffe0; hoverColor: #ffe600; hoverEnabled: true"
-      hand-trippy
-    ></a-entity>
-    <a-entity
-      id="rightHand"
-      hand-tracking-controls="hand: right; modelStyle: mesh; modelColor: #ffb8e8"
-      hand-tracking-grab-controls="hand: right; color: #ffb8e8; hoverColor: #ffe600; hoverEnabled: true"
-      hand-trippy
-    ></a-entity>
+      <!-- ============ ROTATING CIRCUIT FLOOR ============ -->
+      <a-cylinder circuit-material radius="400" height="3.2" position="0 0 0"
+                  animation="delay: 2; property: rotation; to: 0 360 0; dur: 120000; loop: true; easing: linear"></a-cylinder>
 
-    <a-entity hex-tunnel="speed: 0.052"></a-entity>
-  </a-scene>
+      <!-- ============ RISING / FALLING GREEN RINGS ============ -->
+      <a-ring color="green" radius-inner="20" radius-outer="20.5" rotation="90 0 0"
+              position="0 90 0" shader="flat"
+              animation="delay: 2; property: position; to: 0 0 0; dur: 80000; loop: true"></a-ring>
+      <a-ring color="green" radius-inner="20" radius-outer="20.5" rotation="90 0 0"
+              position="0 0 0" shader="flat"
+              animation="delay: 2; property: position; to: 0 90 0; dur: 80000; loop: true"></a-ring>
 
-  <script>
-    const gate = document.getElementById('audio-gate');
-    const resumeBtn = document.getElementById('audio-resume');
-    let unlocking = false;
+      <!-- ============ RAINBOW DODECAHEDRON (height: change position y here) ============ -->
+      <a-entity geometry="primitive: dodecahedron; radius: 9" rainbow-material
+                position="0 45 0"
+                animation="delay: 400; property: rotation; to: 360 360 360; dur: 82000; easing: linear; loop: true"></a-entity>
 
-    async function unlockAudio() {
-      if (unlocking) return;
-      unlocking = true;
-      try {
-        await TunnelDrone.start();
-        if (TunnelDrone.ctx && TunnelDrone.ctx.state === 'suspended') {
-          await TunnelDrone.ctx.resume();
-        }
-        // Quest / iOS often need a short buffer play inside the gesture
-        if (TunnelDrone.ctx) {
-          const buf = TunnelDrone.ctx.createBuffer(1, 1, TunnelDrone.ctx.sampleRate);
-          const src = TunnelDrone.ctx.createBufferSource();
-          src.buffer = buf;
-          src.connect(TunnelDrone.ctx.destination);
-          src.start(0);
-        }
-        gate.hidden = true;
-        resumeBtn.classList.remove('show');
-        document.body.classList.add('audio-on');
-      } catch (e) {
-        console.warn('Audio unlock failed', e);
-        resumeBtn.classList.add('show');
-      } finally {
-        unlocking = false;
-      }
-    }
+      <!-- ============ ORBITING ROBOT ============ -->
+      <a-entity animation="property: rotation; to: 0 360 0; loop: true; dur: 120000; easing: linear">
+        <a-entity position="0 0 -50" rotation="0 -90 0">
+          <a-box position="0 8 0" width="6" height="14" depth="4"
+                 material="color: #14161f; metalness: 0.9; roughness: 0.35"></a-box>
+          <a-box position="0 17 0" width="4" height="4" depth="3.5"
+                 material="color: #14161f; metalness: 0.9; roughness: 0.35"></a-box>
+          <a-box position="-1.1 16.8 -1.8" width="0.8" height="0.4" depth="0.2"
+                 material="shader: flat; color: #00ffcc"></a-box>
+          <a-box position="1.1 16.8 -1.8" width="0.8" height="0.4" depth="0.2"
+                 material="shader: flat; color: #00ffcc"></a-box>
+          <a-box position="-4 9 0" width="1.6" height="10" depth="2"
+                 material="color: #1c1f2c; metalness: 0.8; roughness: 0.4"></a-box>
+          <a-box position="4 9 0" width="1.6" height="10" depth="2"
+                 material="color: #1c1f2c; metalness: 0.8; roughness: 0.4"></a-box>
+        </a-entity>
+      </a-entity>
 
-    async function resumeAudio() {
-      if (!TunnelDrone.ctx) {
-        await unlockAudio();
-        return;
-      }
-      try {
-        await TunnelDrone.ctx.resume();
-        resumeBtn.classList.remove('show');
-      } catch (e) {
-        resumeBtn.classList.add('show');
-      }
-    }
+      <!-- ============ VOLUMETRIC LASERS ============ -->
+      <a-entity laser-fan="color: #00ff66; spin: 0.20" position="-60 0 -30"></a-entity>
+      <a-entity laser-fan="color: #00e5ff; spin: 0.14" position="20 0 -50"></a-entity>
+      <a-entity laser-fan="color: #00e5ff; spin: 0.28" position="60 0 -20"></a-entity>
+      <a-entity laser-fan="color: #00ff66; spin: 0.17" position="40 0 60"></a-entity>
+      <a-entity laser-fan="color: #00e5ff; spin: 0.24" position="-40 0 -60"></a-entity>
+      <a-entity laser-fan="color: #00ff66; spin: 0.12" position="-60 0 70"></a-entity>
+      <a-entity laser-fan="color: #00e5ff; spin: 0.19" position="20 0 80"></a-entity>
+      <a-entity laser-fan="color: #00ff66; spin: 0.26" position="60 0 90"></a-entity>
+      <a-entity laser-fan="color: #00e5ff; spin: 0.15" position="-66 0 -10"></a-entity>
+      <a-entity laser-fan="color: #00ff66; spin: 0.22" position="35 0 -5"></a-entity>
 
-    function onGatePointer(e) {
-      e.preventDefault();
-      unlockAudio();
-    }
-    gate.addEventListener('click', onGatePointer);
-    gate.addEventListener('touchend', onGatePointer, { passive: false });
-    resumeBtn.addEventListener('click', function (e) {
-      e.preventDefault();
-      resumeAudio();
-    });
-    resumeBtn.addEventListener('touchend', function (e) {
-      e.preventDefault();
-      resumeAudio();
-    }, { passive: false });
+      <!-- ============ PLAYER ============ -->
+      <a-entity id="rig" position="0 3 20" movement-controls="speed: 0.3">
+        <a-entity camera position="0 4.5 0" look-controls wasd-controls="enabled: false"></a-entity>
+      </a-entity>
 
-    const sceneEl = document.querySelector('a-scene');
-    sceneEl.addEventListener('enter-vr', function () {
-      // Immersive mode often suspends AudioContext — try resume; show tap if needed
-      if (TunnelDrone.ctx) {
-        TunnelDrone.ctx.resume().then(function () {
-          if (TunnelDrone.ctx.state !== 'running') resumeBtn.classList.add('show');
-        }).catch(function () {
-          resumeBtn.classList.add('show');
-        });
-      } else {
-        resumeBtn.classList.add('show');
-      }
-    });
-    sceneEl.addEventListener('exit-vr', function () {
-      resumeAudio();
-    });
-
-    // If context suspends later, surface the tap button
-    setInterval(function () {
-      if (!TunnelDrone.running || !TunnelDrone.ctx) return;
-      if (TunnelDrone.ctx.state === 'suspended' && gate.hidden) {
-        resumeBtn.classList.add('show');
-      }
-    }, 2000);
-  </script>
-</body>
+    </a-scene>
+  </body>
 </html>
